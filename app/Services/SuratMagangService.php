@@ -25,7 +25,7 @@ class SuratMagangService
         $user = $pengajuan->user;
         $penandatangan = config('magang.penandatangan');
 
-        $html = view('surat.magang', [
+        $html = view('surat.suratmagang', [
             'kop' => $this->gambar(config('magang.kop_path')),
             'ttd' => $this->gambar($penandatangan['ttd_path'] ?? null),
 
