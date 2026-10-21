@@ -3,8 +3,10 @@
 use App\Http\Controllers\Api\AuthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-
-
+use App\Http\Controllers\Admin\BerkasPengajuanController;
+use App\Http\Controllers\Admin\PengajuanMagangController as AdminPengajuanController;
+use App\Http\Controllers\Mahasiswa\PengajuanMagangController;
+use App\Http\Controllers\VerifikasiSuratController;
 
 // Auth (publik)
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:10,1');
