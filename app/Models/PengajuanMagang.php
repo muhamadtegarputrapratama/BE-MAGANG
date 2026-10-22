@@ -10,25 +10,12 @@ class PengajuanMagang extends Model
 {
     protected $table = 'pengajuan_magang';
 
-    protected $fillable = [
-        'user_id',
-        'instansi',
-        'alamat_instansi',
-        'tanggal_mulai',
-        'tanggal_selesai',
-        'status',
-        'catatan_revisi',
-        'diverifikasi_oleh',
-        'diverifikasi_at',
-        'file_bukti_spp',
-        'file_surat_rekomendasi',
-        'kode_verifikasi',
-        'ditandatangani_at',
-        'dikirim_at',
-        'nomor_surat',
-        'file_surat_pengajuan',
-        'file_surat_magang',
-    ];
+   protected $fillable = [
+    'instansi',
+    'alamat_instansi',
+    'tanggal_mulai',
+    'tanggal_selesai',
+];
 
     protected function casts(): array
     {
