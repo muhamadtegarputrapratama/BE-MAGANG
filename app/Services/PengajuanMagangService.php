@@ -12,52 +12,50 @@ use Illuminate\Validation\ValidationException;
 
 class PengajuanMagangService
 {
-    public function __construct(private SuratPengajuanService $surat)
+    public function __construct(private SuratPengajuanService $surat) {}
+
+    public function buatDraft(User $user, array $data): PengajuanMagang
     {
+        $pengajuan = new PengajuanMagang();
+
+
+        $pengajuan->instansi = $data['instansi'];
+        $pengajuan->alamat_instansi = $data['alamat_instansi'];
+        $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+        $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+
+
+        $pengajuan->user_id = $user->id;
+        $pengajuan->status = StatusPengajuan::Draft;
+        $pengajuan->kode_verifikasi = Str::random(32);
+
+        $pengajuan->save();
+
+        return $pengajuan;
     }
 
-  public function buatDraft(User $user, array $data): PengajuanMagang
-{
-    $pengajuan = new PengajuanMagang();
+    public function perbarui(
+        PengajuanMagang $pengajuan,
+        array $data
+    ): PengajuanMagang {
+        $this->pastikanBisaDiedit($pengajuan);
 
+        $this->hapusFile($pengajuan->file_surat_pengajuan);
 
-    $pengajuan->instansi = $data['instansi'];
-    $pengajuan->alamat_instansi = $data['alamat_instansi'];
-    $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
-    $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+        // Hanya data form yang boleh diperbarui.
+        $pengajuan->instansi = $data['instansi'];
+        $pengajuan->alamat_instansi = $data['alamat_instansi'];
+        $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+        $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
+        // Perubahan data membatalkan tanda tangan sebelumnya.
+        $pengajuan->ditandatangani_at = null;
+        $pengajuan->file_surat_pengajuan = null;
 
-    $pengajuan->user_id = $user->id;
-    $pengajuan->status = StatusPengajuan::Draft;
-    $pengajuan->kode_verifikasi = Str::random(32);
+        $pengajuan->save();
 
-    $pengajuan->save();
-
-    return $pengajuan;
-}
-
-   public function perbarui(
-    PengajuanMagang $pengajuan,
-    array $data
-): PengajuanMagang {
-    $this->pastikanBisaDiedit($pengajuan);
-
-    $this->hapusFile($pengajuan->file_surat_pengajuan);
-
-    // Hanya data form yang boleh diperbarui.
-    $pengajuan->instansi = $data['instansi'];
-    $pengajuan->alamat_instansi = $data['alamat_instansi'];
-    $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
-    $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
-
-    // Perubahan data membatalkan tanda tangan sebelumnya.
-    $pengajuan->ditandatangani_at = null;
-    $pengajuan->file_surat_pengajuan = null;
-
-    $pengajuan->save();
-
-    return $pengajuan;
-}
+        return $pengajuan;
+    }
 
     /** Tahap 2: preview surat. Kalau sudah ditandatangani, tampilkan versi final. */
     public function previewSurat(PengajuanMagang $pengajuan): string
@@ -119,15 +117,15 @@ class PengajuanMagangService
             $baru['file_surat_rekomendasi'] = $suratRekomendasi->store($folder, 'local');
         }
 
-            foreach ($baru as $kolom => $path) {
-                  $pengajuan->{$kolom} = $path;
-            }
+        foreach ($baru as $kolom => $path) {
+            $pengajuan->{$kolom} = $path;
+        }
 
 
-$pengajuan->status = StatusPengajuan::MenungguVerifikasi;
-$pengajuan->dikirim_at = now();
+        $pengajuan->status = StatusPengajuan::MenungguVerifikasi;
+        $pengajuan->dikirim_at = now();
 
-$pengajuan->save();
+        $pengajuan->save();
 
         foreach ($lama as $path) {
             $this->hapusFile($path);

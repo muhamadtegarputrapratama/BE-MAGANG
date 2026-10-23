@@ -5,7 +5,7 @@
     <title>Surat Pengantar Magang</title>
     <style>
         @page {
-            margin: 1.5cm 2.3cm 2cm 2.3cm;
+            margin: 1.3cm 2.3cm 2.2cm 2.3cm;
         }
 
         body {
@@ -15,25 +15,36 @@
             color: #000;
         }
 
-        .kop img {
+        table.kop {
             width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 26px;
         }
 
-        .kop-teks {
-            text-align: center;
-            border-bottom: 2px solid #000;
-            padding-bottom: 8px;
-            margin-bottom: 18px;
+        table.kop td {
+            vertical-align: middle;
+            padding: 0;
         }
 
-        .kop-teks .k1 { font-size: 10pt; font-weight: bold; }
-        .kop-teks .k2 { font-size: 16pt; font-weight: bold; }
-        .kop-teks .k3 { font-size: 11pt; }
+        td.kop-logo { width: 70px; }
+        td.kop-logo img { width: 62px; height: 62px; }
+        td.kop-teks { padding-left: 6px; }
+
+        .k1 { font-size: 8pt; font-weight: bold; }
+        .k2 { font-size: 16pt; font-weight: bold; line-height: 1.15; }
+        .k3 { font-size: 10pt; color: #444; }
+
+        td.kop-kontak {
+            width: 200px;
+            border-left: 1px solid #000;
+            padding-left: 10px;
+            font-size: 8pt;
+            line-height: 1.4;
+        }
 
         table.meta {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 14px;
             margin-bottom: 14px;
         }
 
@@ -67,28 +78,43 @@
             page-break-inside: avoid;
         }
 
-        .ttd-ruang {
-            height: 70px;
-        }
+        .ttd-ruang  { height: 70px; }
+        .ttd-gambar { height: 70px; }
 
-        .ttd-gambar {
-            height: 70px;
+        .footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: -1.5cm;
+            text-align: center;
+            font-size: 11pt;
+            color: #444;
         }
     </style>
 </head>
 <body>
 
-    <div class="kop">
-        @if($kop)
-            <img src="{{ $kop }}" alt="Kop surat">
-        @else
-            <div class="kop-teks">
-                <div class="k1">KEMENTERIAN PENDIDIKAN TINGGI, SAINS, DAN TEKNOLOGI</div>
-                <div class="k2">INSTITUT PERTANIAN BOGOR</div>
+    <div class="footer">{{ $kop['slogan'] }}</div>
+
+    <table class="kop">
+        <tr>
+            <td class="kop-logo">
+                @if($logo)
+                    <img src="{{ $logo }}" alt="Logo IPB">
+                @endif
+            </td>
+            <td class="kop-teks">
+                <div class="k1">{{ $kop['kementerian'] }}</div>
+                <div class="k2">{{ $kop['institusi'] }}</div>
                 <div class="k3">{{ strtoupper($fakultas) }}</div>
-            </div>
-        @endif
-    </div>
+            </td>
+            <td class="kop-kontak">
+                @foreach($kop['kontak'] as $baris)
+                    {{ $baris }}<br>
+                @endforeach
+            </td>
+        </tr>
+    </table>
 
     <table class="meta">
         <tr>

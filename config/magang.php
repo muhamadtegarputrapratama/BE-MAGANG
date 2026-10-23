@@ -14,9 +14,21 @@ return [
         'mulai_dari' => env('NOMOR_SURAT_MULAI', 1),
     ],
 
-    // Gambar kop surat, relatif terhadap folder public (contoh: images/kop-surat.png).
-    // Kosong/tidak ada filenya = memakai kop teks sederhana.
-    'kop_path' => env('KOP_SURAT_PATH'),
+    // Logo di kop surat, relatif terhadap folder public
+    'logo_path' => env('LOGO_PATH', 'images/logo-ipb.png'),
+
+    // Isi kop surat pengantar magang
+    'kop' => [
+        'kementerian' => 'KEMENTERIAN PENDIDIKAN TINGGI, SAINS, DAN TEKNOLOGI',
+        'institusi'   => 'INSTITUT PERTANIAN BOGOR',
+        'kontak'      => [
+            'Kampus IPB Dramaga, Bogor 16680',
+            'Telepon (0251) 8621677',
+            'fahutan@apps.ipb.ac.id',
+            'fahutan.ipb.ac.id',
+        ],
+        'slogan'      => 'Inspiring Innovation with Integrity',
+    ],
 
     // Penandatangan surat pengantar magang
     'penandatangan' => [
@@ -26,4 +38,4 @@ return [
         // gambar tanda tangan di folder public. Kosong = ruang kosong untuk tanda tangan basah
         'ttd_path' => env('PENANDATANGAN_TTD'),
     ],
-]; 
+];
