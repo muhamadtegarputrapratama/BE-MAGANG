@@ -84,6 +84,24 @@ class PengajuanMagangService
         return $pengajuan;
     }
 
+    /** Membatalkan tanda tangan: surat final dan QR dihapus, preview kembali tanpa QR. */
+    public function batalkanTandaTangan(PengajuanMagang $pengajuan): PengajuanMagang
+    {
+        $this->pastikanBisaDiedit($pengajuan);
+
+        if (! $pengajuan->sudahDitandatangani()) {
+            return $pengajuan;
+        }
+
+        $this->hapusFile($pengajuan->file_surat_pengajuan);
+
+        $pengajuan->ditandatangani_at = null;
+        $pengajuan->file_surat_pengajuan = null;
+        $pengajuan->save();
+
+        return $pengajuan;
+    }
+
     /** Tahap 3-4: simpan dua file, lalu kirim ke admin. */
     public function kirim(
         PengajuanMagang $pengajuan,
