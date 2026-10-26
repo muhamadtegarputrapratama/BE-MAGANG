@@ -26,6 +26,7 @@ class PengajuanMagangService
 
 
         $pengajuan->user_id = $user->id;
+        $pengajuan->nama = $user->name;
         $pengajuan->status = StatusPengajuan::Draft;
         $pengajuan->kode_verifikasi = Str::random(32);
 

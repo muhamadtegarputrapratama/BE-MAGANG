@@ -11,6 +11,8 @@ class PengajuanMagang extends Model
     protected $table = 'pengajuan_magang';
 
    protected $fillable = [
+    'user_id', 
+    'nama', 
     'instansi',
     'alamat_instansi',
     'tanggal_mulai',
