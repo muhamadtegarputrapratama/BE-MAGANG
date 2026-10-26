@@ -38,71 +38,120 @@ class PengajuanMagangService
     }
 
     public function perbarui(
-        PengajuanMagang $pengajuan,
-        array $data
-    ): PengajuanMagang {
-        $this->pastikanBisaDiedit($pengajuan);
+    PengajuanMagang $pengajuan,
+    array $data
+): PengajuanMagang {
+    $this->pastikanBisaDiedit($pengajuan);
 
-        $this->hapusFile($pengajuan->file_surat_pengajuan);
+    // Simpan path lama terlebih dahulu.
+    $fileLama = $pengajuan->file_surat_pengajuan;
 
-        // Hanya data form yang boleh diperbarui.
-        $pengajuan->instansi = $data['instansi'];
-        $pengajuan->alamat_instansi = $data['alamat_instansi'];
-        $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
-        $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+    // Perbarui hanya kolom yang boleh diubah mahasiswa.
+    $pengajuan->instansi = $data['instansi'];
+    $pengajuan->alamat_instansi = $data['alamat_instansi'];
+    $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+    $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
-        // Perubahan data membatalkan tanda tangan sebelumnya.
-        $pengajuan->ditandatangani_at = null;
-        $pengajuan->file_surat_pengajuan = null;
+    // Perubahan data membatalkan tanda tangan sebelumnya.
+    $pengajuan->ditandatangani_at = null;
+    $pengajuan->file_surat_pengajuan = null;
 
-        $pengajuan->save();
+    // Simpan database dahulu.
+    $pengajuan->save();
 
-        return $pengajuan;
+    // Hapus file lama setelah database berhasil diperbarui.
+    if ($fileLama) {
+        $this->hapusFile($fileLama);
     }
+
+    return $pengajuan->refresh();
+}
 
     /** Tahap 2: preview surat. Kalau sudah ditandatangani, tampilkan versi final. */
-    public function previewSurat(PengajuanMagang $pengajuan): string
-    {
-        if ($pengajuan->sudahDitandatangani()) {
-            return Storage::disk('local')->get($pengajuan->file_surat_pengajuan);
-        }
+  public function previewSurat(PengajuanMagang $pengajuan): string
+{
+    if ($pengajuan->sudahDitandatangani()) {
+        $path = $pengajuan->file_surat_pengajuan;
+        $disk = Storage::disk('local');
 
-        return $this->surat->render($pengajuan, denganQr: false);
+        // Pastikan file surat yang ditandatangani masih tersedia.
+        abort_unless(
+            $path && $disk->exists($path),
+            404,
+            'File surat yang ditandatangani tidak ditemukan.'
+        );
+
+        return $disk->get($path);
     }
+
+    // Jika belum ditandatangani, tampilkan preview tanpa QR.
+    return $this->surat->render($pengajuan, denganQr: false);
+}
 
     /** Tahap 2b: tanda tangan, yaitu surat final dengan QR dibuat dan disimpan. */
-    public function tandaTangani(PengajuanMagang $pengajuan): PengajuanMagang
-    {
-        $this->pastikanBisaDiedit($pengajuan);
+  public function tandaTangani(
+    PengajuanMagang $pengajuan
+): PengajuanMagang {
+    $this->pastikanBisaDiedit($pengajuan);
 
-        if ($pengajuan->sudahDitandatangani()) {
-            return $pengajuan;
-        }
-
-        $pengajuan->ditandatangani_at = now();
-        $pengajuan->file_surat_pengajuan = $this->surat->simpan($pengajuan);
-        $pengajuan->save();
-
+    if ($pengajuan->sudahDitandatangani()) {
         return $pengajuan;
     }
+
+    $pathBaru = null;
+
+    try {
+        // Atur timestamp agar data surat yang dirender sesuai.
+        $pengajuan->ditandatangani_at = now();
+
+        // Buat dan simpan PDF final.
+        $pathBaru = $this->surat->simpan($pengajuan);
+
+        if (! $pathBaru) {
+            throw new \RuntimeException(
+                'Gagal menyimpan surat pengajuan.'
+            );
+        }
+
+        $pengajuan->file_surat_pengajuan = $pathBaru;
+        $pengajuan->save();
+
+        return $pengajuan->refresh();
+    } catch (Throwable $e) {
+        // Bersihkan file baru jika proses gagal.
+        if ($pathBaru) {
+            $this->hapusFile($pathBaru);
+        }
+
+        throw $e;
+    }
+}
 
     /** Membatalkan tanda tangan: surat final dan QR dihapus, preview kembali tanpa QR. */
-    public function batalkanTandaTangan(PengajuanMagang $pengajuan): PengajuanMagang
-    {
-        $this->pastikanBisaDiedit($pengajuan);
+  public function batalkanTandaTangan(
+    PengajuanMagang $pengajuan
+): PengajuanMagang {
+    $this->pastikanBisaDiedit($pengajuan);
 
-        if (! $pengajuan->sudahDitandatangani()) {
-            return $pengajuan;
-        }
-
-        $this->hapusFile($pengajuan->file_surat_pengajuan);
-
-        $pengajuan->ditandatangani_at = null;
-        $pengajuan->file_surat_pengajuan = null;
-        $pengajuan->save();
-
+    if (! $pengajuan->sudahDitandatangani()) {
         return $pengajuan;
     }
+
+    // Simpan path file lama sebelum mengubah data.
+    $fileLama = $pengajuan->file_surat_pengajuan;
+
+    // Hapus referensi tanda tangan dari database.
+    $pengajuan->ditandatangani_at = null;
+    $pengajuan->file_surat_pengajuan = null;
+    $pengajuan->save();
+
+    // Hapus PDF lama setelah database berhasil disimpan.
+    if ($fileLama) {
+        $this->hapusFile($fileLama);
+    }
+
+    return $pengajuan->refresh();
+}
 
    public function kirim(
     PengajuanMagang $pengajuan,

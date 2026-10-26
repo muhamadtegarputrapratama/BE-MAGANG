@@ -19,7 +19,7 @@ Route::get('/verifikasi/{kode}', [VerifikasiSuratController::class, 'show'])
 
 Route::get('/admin/pengajuan/{pengajuan}/berkas/{jenis}', [BerkasPengajuanController::class, 'tampil'])
     ->name('admin.pengajuan.berkas')
-    ->middleware('signed');
+    ->middleware(['auth:sanctum', 'role:admin_kpap', 'signed']);
 
 
 
@@ -33,18 +33,35 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
+   
     // ----- Mahasiswa -----
-    Route::prefix('pengajuan-magang')->group(function () {
-        Route::get('/', [MahasiswaPengajuanController::class, 'index']);
-        Route::post('/', [MahasiswaPengajuanController::class, 'store']);
-        Route::get('/{pengajuan}', [MahasiswaPengajuanController::class, 'show']);
-        Route::put('/{pengajuan}', [MahasiswaPengajuanController::class, 'update']);
-        Route::get('/{pengajuan}/preview-surat', [MahasiswaPengajuanController::class, 'preview']);
-        Route::post('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'tandaTangan']);
-        Route::post('/{pengajuan}/kirim', [MahasiswaPengajuanController::class, 'kirim']);
-        Route::post('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'tandaTangan']);
-        Route::delete('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'batalTandaTangan']);
-    });
+Route::prefix('pengajuan-magang')->group(function () {
+    Route::get('/', [MahasiswaPengajuanController::class, 'index']);
+    Route::post('/', [MahasiswaPengajuanController::class, 'store']);
+
+    Route::get('/{pengajuan}', [MahasiswaPengajuanController::class, 'show']);
+    Route::put('/{pengajuan}', [MahasiswaPengajuanController::class, 'update']);
+
+    Route::get(
+        '/{pengajuan}/preview-surat',
+        [MahasiswaPengajuanController::class, 'preview']
+    );
+
+    Route::post(
+        '/{pengajuan}/tanda-tangan',
+        [MahasiswaPengajuanController::class, 'tandaTangan']
+    );
+
+    Route::delete(
+        '/{pengajuan}/tanda-tangan',
+        [MahasiswaPengajuanController::class, 'batalTandaTangan']
+    );
+
+    Route::post(
+        '/{pengajuan}/kirim',
+        [MahasiswaPengajuanController::class, 'kirim']
+    );
+});
 
     // ----- Admin KPAP -----
     Route::middleware('role:admin_kpap')

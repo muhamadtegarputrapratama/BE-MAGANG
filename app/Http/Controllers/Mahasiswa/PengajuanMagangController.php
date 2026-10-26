@@ -87,10 +87,15 @@ class PengajuanMagangController extends Controller
         return $this->respons($pengajuan, 'Pengajuan berhasil dikirim ke admin.');
     }
 
-    private function pastikanPemilik(Request $request, PengajuanMagang $pengajuan): void
-    {
-        abort_unless($pengajuan->user_id === $request->user()->id, 403);
-    }
+   private function pastikanPemilik(
+    Request $request,
+    PengajuanMagang $pengajuan
+): void {
+    abort_unless(
+        (int) $pengajuan->user_id === (int) $request->user()->id,
+        403
+    );
+}
 
     private function respons(PengajuanMagang $pengajuan, string $pesan, int $status = 200)
     {
