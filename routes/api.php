@@ -44,6 +44,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{pengajuan}/preview-surat', [MahasiswaPengajuanController::class, 'preview']);
         Route::post('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'tandaTangan']);
         Route::post('/{pengajuan}/kirim', [MahasiswaPengajuanController::class, 'kirim']);
+        Route::post('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'tandaTangan']);
+        Route::delete('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'batalTandaTangan']);
     });
 
     // ----- Admin KPAP -----
@@ -55,4 +57,3 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::patch('/{pengajuan}/status', [AdminPengajuanController::class, 'ubahStatus']);
         });
 });
-

@@ -12,9 +12,7 @@ use Illuminate\Http\Request;
 
 class PengajuanMagangController extends Controller
 {
-    public function __construct(private PengajuanMagangService $service)
-    {
-    }
+    public function __construct(private PengajuanMagangService $service) {}
 
     public function index(Request $request)
     {
@@ -65,6 +63,15 @@ class PengajuanMagangController extends Controller
         $pengajuan = $this->service->tandaTangani($pengajuan);
 
         return $this->respons($pengajuan, 'Surat pengajuan berhasil ditandatangani.');
+    }
+
+    public function batalTandaTangan(Request $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        $pengajuan = $this->service->batalkanTandaTangan($pengajuan);
+
+        return $this->respons($pengajuan, 'Tanda tangan dibatalkan.');
     }
 
     public function kirim(KirimPengajuanRequest $request, PengajuanMagang $pengajuan)
