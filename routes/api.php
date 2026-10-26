@@ -22,12 +22,10 @@ Route::get('/admin/pengajuan/{pengajuan}/berkas/{jenis}', [BerkasPengajuanContro
     ->middleware('signed');
 
 
-Route::middleware('auth:sanctum')->group(function () {
 
 
-    Route::get('/me', [AuthController::class, 'me']);
-    Route::post('/logout', [AuthController::class, 'logout']);
-});
+
+
 
 
 Route::middleware('auth:sanctum')->group(function () {
