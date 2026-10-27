@@ -17,6 +17,8 @@ class PengajuanMagangAdminDetailResource extends PengajuanMagangAdminResource
             'nomor_surat'     => $this->nomor_surat,
             'diverifikasi_at' => $this->diverifikasi_at?->toIso8601String(),
             'berkas'          => $this->daftarBerkas(),
+            'bukti_spp_url'         => $this->urlBerkas($this->file_bukti_spp, 'spp'),
+            'surat_rekomendasi_url' => $this->urlBerkas($this->file_surat_rekomendasi, 'rekomendasi'),
         ]);
     }
 
@@ -48,13 +50,16 @@ class PengajuanMagangAdminDetailResource extends PengajuanMagangAdminResource
         return $hasil;
     }
 
-    /** Link sementara (10 menit) yang bertanda tangan, aman dipakai di iframe atau img. */
-    private function urlBerkas(string $jenis, string $mode): string
-    {
-        return URL::temporarySignedRoute(
-            'admin.pengajuan.berkas',
-            now()->addMinutes(10),
-            ['pengajuan' => $this->id, 'jenis' => $jenis, 'mode' => $mode],
-        );
+   private function urlBerkas(?string $path, string $jenis): ?string
+{
+    if (! $path) {
+        return null;
     }
+
+    return URL::temporarySignedRoute(
+        'admin.pengajuan.berkas',
+        now()->addMinutes(30),
+        ['pengajuan' => $this->id, 'jenis' => $jenis, 'nama' => basename($path)]
+    );
+}
 }

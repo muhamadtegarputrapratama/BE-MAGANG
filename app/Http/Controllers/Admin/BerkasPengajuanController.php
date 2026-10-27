@@ -19,51 +19,47 @@ class BerkasPengajuanController extends Controller
         'bukti-spp'         => 'file_bukti_spp',
         'surat-rekomendasi' => 'file_surat_rekomendasi',
         'surat-magang'      => 'file_surat_magang',
+        'spp' => 'file_bukti_spp',
+        'rekomendasi' => 'file_surat_rekomendasi',
     ];
 
-    public function tampil(
-        Request $request,
-        PengajuanMagang $pengajuan,
-        string $jenis
-    ) {
-        // Pastikan pengguna sudah login dan memiliki role admin.
-        $user = $request->user();
+    public function tampil(Request $request, PengajuanMagang $pengajuan)
+{
+    // Akses dijaga oleh middleware 'signed' pada route.
+    $jenis = (string) $request->route('jenis');
 
-        abort_unless($user, 401);
-        abort_unless($user->hasRole('admin_kpap'), 403);
+    abort_unless(
+        isset(self::BERKAS[$jenis]),
+        404,
+        'Jenis berkas tidak dikenal: ' . $jenis
+    );
 
-        // Hanya jenis berkas yang diizinkan yang bisa diakses.
-        abort_unless(isset(self::BERKAS[$jenis]), 404);
+    abort_if(
+        $pengajuan->status === StatusPengajuan::Draft,
+        404,
+        'Pengajuan masih draft.'
+    );
 
-        // Sembunyikan pengajuan draft.
-        abort_if(
-            $pengajuan->status === StatusPengajuan::Draft,
-            404
-        );
+    $path = $pengajuan->{self::BERKAS[$jenis]};
 
-        $path = $pengajuan->{self::BERKAS[$jenis]};
+    /** @var FilesystemAdapter $disk */
+    $disk = Storage::disk('local');
 
-        /** @var FilesystemAdapter $disk */
-        $disk = Storage::disk('local');
+    abort_if(! $path, 404, 'Kolom berkas kosong di database.');
+    abort_if(! $disk->exists($path), 404, 'File tidak ada di disk: ' . $path);
 
-        // Jangan tampilkan error internal jika berkas tidak tersedia.
-        abort_if(
-            ! $path || ! $disk->exists($path),
-            404
-        );
+    $ekstensi = pathinfo($path, PATHINFO_EXTENSION);
+    $nama = "{$jenis}-{$pengajuan->id}.{$ekstensi}";
 
-        $ekstensi = pathinfo($path, PATHINFO_EXTENSION);
-        $nama = "{$jenis}-{$pengajuan->id}.{$ekstensi}";
-
-        if ($request->query('mode') === 'download') {
-            return $disk->download($path, $nama);
-        }
-
-        return $disk->response(
-            $path,
-            $nama,
-            ['X-Content-Type-Options' => 'nosniff'],
-            'inline'
-        );
+    if ($request->query('mode') === 'download') {
+        return $disk->download($path, $nama);
     }
+
+    return $disk->response(
+        $path,
+        $nama,
+        ['X-Content-Type-Options' => 'nosniff'],
+        'inline'
+    );
+}
 }

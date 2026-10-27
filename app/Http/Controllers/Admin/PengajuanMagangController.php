@@ -11,6 +11,7 @@ use App\Models\PengajuanMagang;
 use App\Services\VerifikasiPengajuanService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Storage;
 
 class PengajuanMagangController extends Controller
 {
@@ -75,4 +76,18 @@ class PengajuanMagangController extends Controller
         return (new PengajuanMagangAdminDetailResource($pengajuan->load('user')))
             ->additional(['message' => $pesan]);
     }
+
+    public function berkas(PengajuanMagang $pengajuan, string $jenis, string $nama)
+{
+    $path = match ($jenis) {
+        'spp'         => $pengajuan->file_bukti_spp,
+        'rekomendasi' => $pengajuan->file_surat_rekomendasi,
+        default       => null,
+    };
+
+    abort_unless($path && Storage::disk('local')->exists($path), 404);
+
+    return Storage::disk('local')->response($path);
+}
+
 }
