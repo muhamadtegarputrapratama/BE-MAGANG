@@ -36,16 +36,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
 
     // ----- Mahasiswa -----
-    Route::prefix('pengajuan-magang')->group(function () {
+    Route::middleware('role:mahasiswa')->prefix('pengajuan-magang')->group(function () {
         Route::get('/', [MahasiswaPengajuanController::class, 'index']);
         Route::post('/', [MahasiswaPengajuanController::class, 'store']);
         Route::get('/{pengajuan}', [MahasiswaPengajuanController::class, 'show']);
         Route::put('/{pengajuan}', [MahasiswaPengajuanController::class, 'update']);
         Route::get('/{pengajuan}/preview-surat', [MahasiswaPengajuanController::class, 'preview']);
         Route::post('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'tandaTangan']);
-        Route::post('/{pengajuan}/kirim', [MahasiswaPengajuanController::class, 'kirim']);
-        Route::post('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'tandaTangan']);
         Route::delete('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'batalTandaTangan']);
+        Route::post('/{pengajuan}/kirim', [MahasiswaPengajuanController::class, 'kirim']);
     });
 
     // ----- Admin KPAP -----
