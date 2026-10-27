@@ -9,6 +9,8 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class PengajuanMagangService
 {
@@ -36,122 +38,206 @@ class PengajuanMagangService
     }
 
     public function perbarui(
-        PengajuanMagang $pengajuan,
-        array $data
-    ): PengajuanMagang {
-        $this->pastikanBisaDiedit($pengajuan);
+    PengajuanMagang $pengajuan,
+    array $data
+): PengajuanMagang {
+    $this->pastikanBisaDiedit($pengajuan);
 
-        $this->hapusFile($pengajuan->file_surat_pengajuan);
+    // Simpan path lama terlebih dahulu.
+    $fileLama = $pengajuan->file_surat_pengajuan;
 
-        // Hanya data form yang boleh diperbarui.
-        $pengajuan->instansi = $data['instansi'];
-        $pengajuan->alamat_instansi = $data['alamat_instansi'];
-        $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
-        $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+    // Perbarui hanya kolom yang boleh diubah mahasiswa.
+    $pengajuan->instansi = $data['instansi'];
+    $pengajuan->alamat_instansi = $data['alamat_instansi'];
+    $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+    $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
-        // Perubahan data membatalkan tanda tangan sebelumnya.
-        $pengajuan->ditandatangani_at = null;
-        $pengajuan->file_surat_pengajuan = null;
+    // Perubahan data membatalkan tanda tangan sebelumnya.
+    $pengajuan->ditandatangani_at = null;
+    $pengajuan->file_surat_pengajuan = null;
 
-        $pengajuan->save();
+    // Simpan database dahulu.
+    $pengajuan->save();
 
-        return $pengajuan;
+    // Hapus file lama setelah database berhasil diperbarui.
+    if ($fileLama) {
+        $this->hapusFile($fileLama);
     }
+
+    return $pengajuan->refresh();
+}
 
     /** Tahap 2: preview surat. Kalau sudah ditandatangani, tampilkan versi final. */
-    public function previewSurat(PengajuanMagang $pengajuan): string
-    {
-        if ($pengajuan->sudahDitandatangani()) {
-            return Storage::disk('local')->get($pengajuan->file_surat_pengajuan);
-        }
+  public function previewSurat(PengajuanMagang $pengajuan): string
+{
+    if ($pengajuan->sudahDitandatangani()) {
+        $path = $pengajuan->file_surat_pengajuan;
+        $disk = Storage::disk('local');
 
-        return $this->surat->render($pengajuan, denganQr: false);
+        // Pastikan file surat yang ditandatangani masih tersedia.
+        abort_unless(
+            $path && $disk->exists($path),
+            404,
+            'File surat yang ditandatangani tidak ditemukan.'
+        );
+
+        return $disk->get($path);
     }
+
+    // Jika belum ditandatangani, tampilkan preview tanpa QR.
+    return $this->surat->render($pengajuan, denganQr: false);
+}
 
     /** Tahap 2b: tanda tangan, yaitu surat final dengan QR dibuat dan disimpan. */
-    public function tandaTangani(PengajuanMagang $pengajuan): PengajuanMagang
-    {
-        $this->pastikanBisaDiedit($pengajuan);
+  public function tandaTangani(
+    PengajuanMagang $pengajuan
+): PengajuanMagang {
+    $this->pastikanBisaDiedit($pengajuan);
 
-        if ($pengajuan->sudahDitandatangani()) {
-            return $pengajuan;
-        }
-
-        $pengajuan->ditandatangani_at = now();
-        $pengajuan->file_surat_pengajuan = $this->surat->simpan($pengajuan);
-        $pengajuan->save();
-
+    if ($pengajuan->sudahDitandatangani()) {
         return $pengajuan;
     }
+
+    $pathBaru = null;
+
+    try {
+        // Atur timestamp agar data surat yang dirender sesuai.
+        $pengajuan->ditandatangani_at = now();
+
+        // Buat dan simpan PDF final.
+        $pathBaru = $this->surat->simpan($pengajuan);
+
+        if (! $pathBaru) {
+            throw new \RuntimeException(
+                'Gagal menyimpan surat pengajuan.'
+            );
+        }
+
+        $pengajuan->file_surat_pengajuan = $pathBaru;
+        $pengajuan->save();
+
+        return $pengajuan->refresh();
+    } catch (Throwable $e) {
+        // Bersihkan file baru jika proses gagal.
+        if ($pathBaru) {
+            $this->hapusFile($pathBaru);
+        }
+
+        throw $e;
+    }
+}
 
     /** Membatalkan tanda tangan: surat final dan QR dihapus, preview kembali tanpa QR. */
-    public function batalkanTandaTangan(PengajuanMagang $pengajuan): PengajuanMagang
-    {
-        $this->pastikanBisaDiedit($pengajuan);
+  public function batalkanTandaTangan(
+    PengajuanMagang $pengajuan
+): PengajuanMagang {
+    $this->pastikanBisaDiedit($pengajuan);
 
-        if (! $pengajuan->sudahDitandatangani()) {
-            return $pengajuan;
-        }
-
-        $this->hapusFile($pengajuan->file_surat_pengajuan);
-
-        $pengajuan->ditandatangani_at = null;
-        $pengajuan->file_surat_pengajuan = null;
-        $pengajuan->save();
-
+    if (! $pengajuan->sudahDitandatangani()) {
         return $pengajuan;
     }
 
-    /** Tahap 3-4: simpan dua file, lalu kirim ke admin. */
-    public function kirim(
-        PengajuanMagang $pengajuan,
-        ?UploadedFile $buktiSpp,
-        ?UploadedFile $suratRekomendasi,
-    ): PengajuanMagang {
-        $this->pastikanBisaDiedit($pengajuan);
+    // Simpan path file lama sebelum mengubah data.
+    $fileLama = $pengajuan->file_surat_pengajuan;
 
-        if (! $pengajuan->sudahDitandatangani()) {
-            throw ValidationException::withMessages([
-                'tanda_tangan' => 'Surat pengajuan harus ditandatangani terlebih dahulu.',
-            ]);
-        }
+    // Hapus referensi tanda tangan dari database.
+    $pengajuan->ditandatangani_at = null;
+    $pengajuan->file_surat_pengajuan = null;
+    $pengajuan->save();
 
-        if (! ($buktiSpp || $pengajuan->file_bukti_spp) || ! ($suratRekomendasi || $pengajuan->file_surat_rekomendasi)) {
-            throw ValidationException::withMessages([
-                'berkas' => 'Bukti SPP dan surat rekomendasi wajib diupload.',
-            ]);
-        }
+    // Hapus PDF lama setelah database berhasil disimpan.
+    if ($fileLama) {
+        $this->hapusFile($fileLama);
+    }
 
-        $folder = "pengajuan/{$pengajuan->id}";
-        $baru = [];
-        $lama = [];
+    return $pengajuan->refresh();
+}
 
+   public function kirim(
+    PengajuanMagang $pengajuan,
+    ?UploadedFile $buktiSpp,
+    ?UploadedFile $suratRekomendasi
+): PengajuanMagang {
+    $this->pastikanBisaDiedit($pengajuan);
+
+    if (! $pengajuan->sudahDitandatangani()) {
+        throw ValidationException::withMessages([
+            'tanda_tangan' => 'Surat pengajuan harus ditandatangani terlebih dahulu.',
+        ]);
+    }
+
+    if (
+        (! $buktiSpp && ! $pengajuan->file_bukti_spp) ||
+        (! $suratRekomendasi && ! $pengajuan->file_surat_rekomendasi)
+    ) {
+        throw ValidationException::withMessages([
+            'berkas' => 'Bukti SPP dan surat rekomendasi wajib tersedia.',
+        ]);
+    }
+
+    $folder = "pengajuan/{$pengajuan->id}";
+    $berkasBaru = [];
+    $berkasLama = [
+        $pengajuan->file_bukti_spp,
+        $pengajuan->file_surat_rekomendasi,
+    ];
+
+    try {
+        // Simpan berkas baru tanpa menghapus berkas lama.
         if ($buktiSpp) {
-            $lama[] = $pengajuan->file_bukti_spp;
-            $baru['file_bukti_spp'] = $buktiSpp->store($folder, 'local');
+            $path = $buktiSpp->store($folder, 'local');
+
+            if (! $path) {
+                throw new \RuntimeException('Gagal menyimpan bukti SPP.');
+            }
+
+            $berkasBaru['file_bukti_spp'] = $path;
         }
 
         if ($suratRekomendasi) {
-            $lama[] = $pengajuan->file_surat_rekomendasi;
-            $baru['file_surat_rekomendasi'] = $suratRekomendasi->store($folder, 'local');
+            $path = $suratRekomendasi->store($folder, 'local');
+
+            if (! $path) {
+                throw new \RuntimeException('Gagal menyimpan surat rekomendasi.');
+            }
+
+            $berkasBaru['file_surat_rekomendasi'] = $path;
         }
 
-        foreach ($baru as $kolom => $path) {
-            $pengajuan->{$kolom} = $path;
-        }
+        // Perbarui database dalam transaksi.
+        DB::transaction(function () use ($pengajuan, $berkasBaru) {
+            foreach ($berkasBaru as $kolom => $path) {
+                $pengajuan->{$kolom} = $path;
+            }
 
-
-        $pengajuan->status = StatusPengajuan::MenungguVerifikasi;
-        $pengajuan->dikirim_at = now();
-
-        $pengajuan->save();
-
-        foreach ($lama as $path) {
+            $pengajuan->status = StatusPengajuan::MenungguVerifikasi;
+            $pengajuan->dikirim_at = now();
+            $pengajuan->save();
+        });
+    } catch (Throwable $e) {
+        // Jika proses gagal, bersihkan berkas baru yang sempat tersimpan.
+        foreach ($berkasBaru as $path) {
             $this->hapusFile($path);
         }
 
-        return $pengajuan;
+        throw $e;
     }
+
+    // Hapus berkas lama hanya setelah database berhasil diperbarui.
+    foreach ($berkasBaru as $kolom => $path) {
+        $pathLama = match ($kolom) {
+            'file_bukti_spp' => $berkasLama[0],
+            'file_surat_rekomendasi' => $berkasLama[1],
+            default => null,
+        };
+
+        if ($pathLama && $pathLama !== $path) {
+            $this->hapusFile($pathLama);
+        }
+    }
+
+    return $pengajuan->refresh();
+}
 
     private function pastikanBisaDiedit(PengajuanMagang $pengajuan): void
     {

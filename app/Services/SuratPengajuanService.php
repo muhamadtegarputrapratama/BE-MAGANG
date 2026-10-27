@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Services;
 
 use App\Models\PengajuanMagang;
@@ -8,45 +7,92 @@ use Dompdf\Options;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use RuntimeException;
 
 class SuratPengajuanService
 {
-    /** Membuat PDF final (dengan QR), disimpan ke storage. Mengembalikan path-nya. */
+    /**
+     * Membuat PDF final dengan QR dan menyimpannya ke storage.
+     * Mengembalikan path file yang berhasil disimpan.
+     */
     public function simpan(PengajuanMagang $pengajuan): string
     {
-        $path = "pengajuan/{$pengajuan->id}/surat-pengajuan.pdf";
+        // Gunakan nama unik agar tidak menimpa file sebelumnya.
+        $path = "pengajuan/{$pengajuan->id}/surat-pengajuan-"
+            . Str::uuid()
+            . '.pdf';
 
-        Storage::disk('local')->put($path, $this->render($pengajuan, denganQr: true));
+        // Buat PDF final dengan QR verifikasi.
+        $pdf = $this->render($pengajuan, denganQr: true);
+
+        // Simpan PDF ke local storage.
+        $berhasil = Storage::disk('local')->put($path, $pdf);
+
+        // Pastikan penyimpanan berhasil.
+        if (! $berhasil) {
+            throw new RuntimeException(
+                'Gagal menyimpan PDF surat pengajuan.'
+            );
+        }
 
         return $path;
     }
 
-    /** Membuat isi PDF. Tanpa QR dipakai untuk preview sebelum tanda tangan. */
-    public function render(PengajuanMagang $pengajuan, bool $denganQr): string
-    {
+    /**
+     * Membuat isi PDF.
+     * Tanpa QR digunakan untuk preview sebelum tanda tangan.
+     */
+    public function render(
+        PengajuanMagang $pengajuan,
+        bool $denganQr
+    ): string {
         $pengajuan->loadMissing('user');
+
         $user = $pengajuan->user;
 
+        // Pastikan pengajuan memiliki pengguna.
+        if (! $user) {
+            throw new RuntimeException(
+                'Data mahasiswa untuk surat pengajuan tidak ditemukan.'
+            );
+        }
+
+        // Siapkan data untuk template surat.
         $html = view('surat.pengajuan', [
-            // SESUAIKAN dengan nama kolom di tabel users milik temanmu
-            'nama'       => $user->name,
-            'nim'        => $user->nim,
+            'nama' => $user->name,
+            'nim' => $user->nim,
             'departemen' => $user->departemen,
 
-            'fakultas'       => config('magang.fakultas'),
-            'kota'           => config('magang.kota'),
-            'instansi'       => $pengajuan->instansi,
-            'alamat'         => $pengajuan->alamat_instansi,
-            'tanggalMulai'   => $pengajuan->tanggal_mulai->translatedFormat('j F Y'),
-            'tanggalSelesai' => $pengajuan->tanggal_selesai->translatedFormat('j F Y'),
-            'tanggalSurat'   => ($pengajuan->ditandatangani_at ?? now())->translatedFormat('j F Y'),
-            'qr'             => $denganQr ? $this->buatQr($pengajuan) : null,
+            'fakultas' => config('magang.fakultas'),
+            'kota' => config('magang.kota'),
+
+            'instansi' => $pengajuan->instansi,
+            'alamat' => $pengajuan->alamat_instansi,
+
+            'tanggalMulai' => $pengajuan->tanggal_mulai
+                ->translatedFormat('j F Y'),
+
+            'tanggalSelesai' => $pengajuan->tanggal_selesai
+                ->translatedFormat('j F Y'),
+
+            'tanggalSurat' => (
+                $pengajuan->ditandatangani_at ?? now()
+            )->translatedFormat('j F Y'),
+
+            'qr' => $denganQr
+                ? $this->buatQr($pengajuan)
+                : null,
         ])->render();
 
+        // Konfigurasi Dompdf.
         $options = new Options();
+
+        // Nonaktifkan akses sumber daya remote.
         $options->set('isRemoteEnabled', false);
 
         $dompdf = new Dompdf($options);
+
         $dompdf->loadHtml($html);
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();
@@ -54,12 +100,37 @@ class SuratPengajuanService
         return $dompdf->output();
     }
 
+    /**
+     * Membuat QR Code yang mengarah ke halaman verifikasi surat.
+     */
     private function buatQr(PengajuanMagang $pengajuan): string
     {
-        $url = rtrim(config('magang.frontend_url'), '/') . '/verifikasi/' . $pengajuan->kode_verifikasi;
+        $frontendUrl = rtrim(
+            (string) config('magang.frontend_url'),
+            '/'
+        );
+
+        if (
+            $frontendUrl === ''
+            || empty($pengajuan->kode_verifikasi)
+        ) {
+            throw new RuntimeException(
+                'URL frontend atau kode verifikasi belum dikonfigurasi.'
+            );
+        }
+
+        $url = $frontendUrl
+            . '/verifikasi/'
+            . $pengajuan->kode_verifikasi;
+
+        $qrCode = new QrCode(
+            data: $url,
+            size: 200,
+            margin: 5
+        );
 
         return (new PngWriter())
-            ->write(new QrCode(data: $url, size: 200, margin: 5))
+            ->write($qrCode)
             ->getDataUri();
     }
 }
