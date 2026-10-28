@@ -11,55 +11,69 @@ use Illuminate\Support\Facades\Storage;
 
 class BerkasPengajuanController extends Controller
 {
-    /**
-     * Jenis berkas pada URL => nama kolom database.
-     */
+    /** jenis di URL => kolom di tabel */
     private const BERKAS = [
         'surat-pengajuan'   => 'file_surat_pengajuan',
         'bukti-spp'         => 'file_bukti_spp',
         'surat-rekomendasi' => 'file_surat_rekomendasi',
         'surat-magang'      => 'file_surat_magang',
-        'spp' => 'file_bukti_spp',
-        'rekomendasi' => 'file_surat_rekomendasi',
     ];
 
-    public function tampil(Request $request, PengajuanMagang $pengajuan)
-{
-    // Akses dijaga oleh middleware 'signed' pada route.
-    $jenis = (string) $request->route('jenis');
+    public function tampil(Request $request, PengajuanMagang $pengajuan, string $jenis)
+    {
+        $mode = $request->query('mode', 'preview');
 
-    abort_unless(
-        isset(self::BERKAS[$jenis]),
-        404,
-        'Jenis berkas tidak dikenal: ' . $jenis
-    );
+        // Kompatibel dengan link bentuk lama: /berkas/download?nama=surat-magang
+        if (in_array($jenis, ['preview', 'download'], true)) {
+            $mode  = $jenis;
+            $jenis = (string) $request->query('nama', $request->query('jenis', ''));
+        }
 
-    abort_if(
-        $pengajuan->status === StatusPengajuan::Draft,
-        404,
-        'Pengajuan masih draft.'
-    );
+        abort_unless(isset(self::BERKAS[$jenis]), 404, "Jenis berkas tidak dikenal: {$jenis}");
+        abort_if($pengajuan->status === StatusPengajuan::Draft, 404, 'Pengajuan belum dikirim.');
 
-    $path = $pengajuan->{self::BERKAS[$jenis]};
+        $path = $pengajuan->{self::BERKAS[$jenis]};
 
-    /** @var FilesystemAdapter $disk */
-    $disk = Storage::disk('local');
+        abort_if(! $path, 404, 'Berkas belum tersedia.');
 
-    abort_if(! $path, 404, 'Kolom berkas kosong di database.');
-    abort_if(! $disk->exists($path), 404, 'File tidak ada di disk: ' . $path);
+        $lokasi = $this->cariFile($path);
 
-    $ekstensi = pathinfo($path, PATHINFO_EXTENSION);
-    $nama = "{$jenis}-{$pengajuan->id}.{$ekstensi}";
+        abort_if(! $lokasi, 404, "File tidak ditemukan di penyimpanan: {$path}");
 
-    if ($request->query('mode') === 'download') {
-        return $disk->download($path, $nama);
+        [$disk, $pathAsli] = $lokasi;
+
+        $ekstensi = pathinfo($pathAsli, PATHINFO_EXTENSION);
+        $nama     = "{$jenis}-{$pengajuan->id}.{$ekstensi}";
+
+        return $mode === 'download'
+            ? $disk->download($pathAsli, $nama)
+            : $disk->response($pathAsli, $nama);   // tampil langsung di browser (inline)
     }
 
-    return $disk->response(
-        $path,
-        $nama,
-        ['X-Content-Type-Options' => 'nosniff'],
-        'inline'
-    );
-}
+    /**
+     * Mencari file di disk privat dulu, lalu disk public (untuk data lama).
+     * Awalan "public/" atau "storage/" pada path lama ikut dicoba tanpa awalan itu.
+     *
+     * @return array{0: FilesystemAdapter, 1: string}|null
+     */
+    private function cariFile(string $path): ?array
+    {
+        $kandidat = array_values(array_unique([
+            $path,
+            ltrim((string) preg_replace('#^(public/|storage/)#', '', $path), '/'),
+        ]));
+
+        foreach (['local', 'public'] as $namaDisk) {
+            /** @var FilesystemAdapter $disk */
+            $disk = Storage::disk($namaDisk);
+
+            foreach ($kandidat as $p) {
+                if ($disk->exists($p)) {
+                    return [$disk, $p];
+                }
+            }
+        }
+
+        return null;
+    }
 }
