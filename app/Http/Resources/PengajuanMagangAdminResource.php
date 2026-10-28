@@ -17,7 +17,10 @@ class PengajuanMagangAdminResource extends JsonResource
                 'nim'        => $this->user->nim,
                 'departemen' => $this->user->departemen,
             ],
-            'instansi' => $this->instansi,
+            'instansi'        => $this->instansi,
+            'tanggal_mulai'   => $this->tanggal_mulai->toDateString(),
+            'tanggal_selesai' => $this->tanggal_selesai->toDateString(),
+            'nomor_surat'     => $this->nomor_surat,
             'status' => [
                 'value' => $this->status->value,
                 'label' => $this->status->label(),
