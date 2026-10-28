@@ -19,7 +19,7 @@ class PengajuanMagangController extends Controller
     {
     }
 
-    /** Halaman tabel: semua pengajuan yang sudah dikirim (tanpa draft). */
+    /** Halaman tabel: pengajuan yang sudah dikirim (tanpa draft), 20 per halaman. */
     public function index(Request $request)
     {
         $filter = $request->validate([
@@ -41,16 +41,33 @@ class PengajuanMagangController extends Controller
                 });
             })
             ->orderByDesc('dikirim_at')
-            ->paginate($filter['per_page'] ?? 15)
+            ->orderByDesc('id')
+            ->paginate($filter['per_page'] ?? 20)
             ->withQueryString();
 
         return PengajuanMagangAdminResource::collection($daftar);
     }
 
-    /** Tombol "Lihat Detail": data lengkap dan daftar file. */
+    /** Jumlah pengajuan per status, untuk tombol filter. */
+    public function ringkasan()
+    {
+        $hitung = PengajuanMagang::where('status', '!=', StatusPengajuan::Draft->value)
+            ->selectRaw('status, count(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
+        return response()->json([
+            'data' => [
+                'menunggu_verifikasi' => (int) ($hitung['menunggu_verifikasi'] ?? 0),
+                'setuju'              => (int) ($hitung['setuju'] ?? 0),
+                'revisi'              => (int) ($hitung['revisi'] ?? 0),
+            ],
+        ]);
+    }
+
+    /** Tombol "Detail": data lengkap dan daftar berkas. */
     public function show(PengajuanMagang $pengajuan)
     {
-        // draft belum dikirim, jadi admin tidak boleh melihatnya
         abort_if($pengajuan->status === StatusPengajuan::Draft, 404);
 
         return new PengajuanMagangAdminDetailResource($pengajuan->load('user'));

@@ -119,9 +119,7 @@ class SuratPengajuanService
             );
         }
 
-        $url = $frontendUrl
-            . '/verifikasi/'
-            . $pengajuan->kode_verifikasi;
+        $url = rtrim(config('magang.verifikasi_url'), '/') . '/' . $pengajuan->kode_verifikasi;
 
         $qrCode = new QrCode(
             data: $url,

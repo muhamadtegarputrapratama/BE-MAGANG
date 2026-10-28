@@ -3,6 +3,8 @@
 return [
     // alamat frontend, dipakai untuk isi QR verifikasi
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+    // Alamat halaman yang dituju QR. Bawaan: halaman verifikasi milik backend sendiri.
+    'verifikasi_url' => env('VERIFIKASI_URL', rtrim(env('APP_URL', 'http://localhost'), '/') . '/verifikasi'),
 
     'fakultas' => 'Fakultas Kehutanan dan Lingkungan',
     'kota'     => 'Bogor',

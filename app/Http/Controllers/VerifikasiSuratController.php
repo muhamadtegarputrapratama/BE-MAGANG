@@ -3,10 +3,36 @@
 namespace App\Http\Controllers;
 
 use App\Models\PengajuanMagang;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\Facades\Storage;
 
 class VerifikasiSuratController extends Controller
 {
-    /** Dituju oleh QR di surat pengajuan. Publik, tanpa login, datanya sengaja minimal. */
+    /** Dituju oleh QR. Menampilkan PDF surat pengajuan itu sendiri. Publik, tanpa login. */
+    public function surat(string $kode)
+    {
+        $pengajuan = PengajuanMagang::where('kode_verifikasi', $kode)
+            ->whereNotNull('ditandatangani_at')
+            ->first();
+
+        abort_if(
+            ! $pengajuan || ! $pengajuan->file_surat_pengajuan,
+            404,
+            'Surat tidak ditemukan atau tanda tangan sudah dibatalkan.'
+        );
+
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+
+        abort_if(! $disk->exists($pengajuan->file_surat_pengajuan), 404, 'File surat tidak ditemukan.');
+
+        // tampil langsung di browser (inline)
+        return $disk->response($pengajuan->file_surat_pengajuan, 'surat-pengajuan.pdf', [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
+    /** Versi data (JSON) untuk kebutuhan aplikasi, datanya sengaja minimal. */
     public function show(string $kode)
     {
         $pengajuan = PengajuanMagang::with('user')
