@@ -2,13 +2,16 @@
 
 namespace App\Http\Controllers\Mahasiswa;
 
+use App\Enums\StatusPengajuan;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\KirimPengajuanRequest;
 use App\Http\Requests\StorePengajuanMagangRequest;
-use App\Http\Resources\PengajuanMagangResource;
+use App\Http\Resources\PengajuanMagangMahasiswaResource;
 use App\Models\PengajuanMagang;
 use App\Services\PengajuanMagangService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class PengajuanMagangController extends Controller
 {
@@ -20,11 +23,26 @@ class PengajuanMagangController extends Controller
             ->latest()
             ->get();
 
-        return PengajuanMagangResource::collection($daftar);
+        return PengajuanMagangMahasiswaResource::collection($daftar);
     }
 
     public function store(StorePengajuanMagangRequest $request)
     {
+        // Satu pengajuan berjalan per mahasiswa: yang perlu revisi diperbaiki, bukan dibuat ulang.
+        $berjalan = PengajuanMagang::where('user_id', $request->user()->id)
+            ->whereIn('status', [
+                StatusPengajuan::MenungguVerifikasi->value,
+                StatusPengajuan::Revisi->value,
+            ])
+            ->exists();
+
+        if ($berjalan) {
+            throw ValidationException::withMessages([
+                'pengajuan' => 'Kamu masih memiliki pengajuan yang sedang diproses atau perlu direvisi. '
+                    . 'Perbaiki pengajuan tersebut atau tunggu hasil verifikasinya.',
+            ]);
+        }
+
         $pengajuan = $this->service->buatDraft($request->user(), $request->validated());
 
         return $this->respons($pengajuan, 'Data pengajuan disimpan sebagai draft.', 201);
@@ -34,7 +52,7 @@ class PengajuanMagangController extends Controller
     {
         $this->pastikanPemilik($request, $pengajuan);
 
-        return new PengajuanMagangResource($pengajuan);
+        return new PengajuanMagangMahasiswaResource($pengajuan);
     }
 
     public function update(StorePengajuanMagangRequest $request, PengajuanMagang $pengajuan)
@@ -62,12 +80,12 @@ class PengajuanMagangController extends Controller
         $this->pastikanPemilik($request, $pengajuan);
 
         abort_unless(
-            $pengajuan->status === \App\Enums\StatusPengajuan::Setuju && $pengajuan->file_surat_magang,
+            $pengajuan->status === StatusPengajuan::Setuju && $pengajuan->file_surat_magang,
             404,
             'Surat pengantar magang belum tersedia atau pengajuan belum disetujui.'
         );
 
-        $disk = \Illuminate\Support\Facades\Storage::disk('local');
+        $disk = Storage::disk('local');
         abort_unless($disk->exists($pengajuan->file_surat_magang), 404, 'File surat pengantar magang tidak ditemukan.');
 
         $mode = $request->query('mode', 'preview');
@@ -109,19 +127,17 @@ class PengajuanMagangController extends Controller
         return $this->respons($pengajuan, 'Pengajuan berhasil dikirim ke admin.');
     }
 
-   private function pastikanPemilik(
-    Request $request,
-    PengajuanMagang $pengajuan
-): void {
-    abort_unless(
-        (int) $pengajuan->user_id === (int) $request->user()->id,
-        403
-    );
-}
+    private function pastikanPemilik(Request $request, PengajuanMagang $pengajuan): void
+    {
+        abort_unless(
+            (int) $pengajuan->user_id === (int) $request->user()->id,
+            403
+        );
+    }
 
     private function respons(PengajuanMagang $pengajuan, string $pesan, int $status = 200)
     {
-        return (new PengajuanMagangResource($pengajuan))
+        return (new PengajuanMagangMahasiswaResource($pengajuan))
             ->additional(['message' => $pesan])
             ->response()
             ->setStatusCode($status);

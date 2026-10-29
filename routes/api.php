@@ -15,7 +15,7 @@ Route::get('/verifikasi/{kode}', [VerifikasiSuratController::class, 'surat'])
     ->where('kode', '[A-Za-z0-9]{32}')
     ->middleware('throttle:30,1');
 
-// Preview/download file untuk admin. Dilindungi signed URL (10 menit),
+// Preview/download file (admin dan pemilik pengajuan). Dilindungi signed URL,
 // tanpa token, supaya bisa dipakai di <iframe>/<img>.
 Route::get('/admin/pengajuan/{pengajuan}/berkas/{jenis}', [BerkasPengajuanController::class, 'tampil'])
     ->name('admin.pengajuan.berkas')
