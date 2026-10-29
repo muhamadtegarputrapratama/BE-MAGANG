@@ -2,13 +2,14 @@
 namespace App\Services;
 
 use App\Models\PengajuanMagang;
+use App\Support\Departemen;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use App\Support\Departemen;
 use RuntimeException;
 
 class SuratPengajuanService
@@ -71,15 +72,9 @@ class SuratPengajuanService
             'instansi' => $pengajuan->instansi,
             'alamat' => $pengajuan->alamat_instansi,
 
-            'tanggalMulai' => $pengajuan->tanggal_mulai
-                ->translatedFormat('j F Y'),
-
-            'tanggalSelesai' => $pengajuan->tanggal_selesai
-                ->translatedFormat('j F Y'),
-
-            'tanggalSurat' => (
-                $pengajuan->ditandatangani_at ?? now()
-            )->translatedFormat('j F Y'),
+            'tanggalMulai' => $this->tanggal($pengajuan->tanggal_mulai),
+            'tanggalSelesai' => $this->tanggal($pengajuan->tanggal_selesai),
+            'tanggalSurat' => $this->tanggal($pengajuan->ditandatangani_at ?? now()),
 
             'qr' => $denganQr
                 ? $this->buatQr($pengajuan)
@@ -101,16 +96,22 @@ class SuratPengajuanService
         return $dompdf->output();
     }
 
+    /** Tanggal berbahasa Indonesia, contoh: "29 Oktober 2026". */
+    private function tanggal($nilai): string
+    {
+        return Carbon::parse($nilai)->locale('id')->translatedFormat('j F Y');
+    }
+
     /**
      * Membuat QR Code yang mengarah ke halaman verifikasi surat.
      */
     private function buatQr(PengajuanMagang $pengajuan): string
     {
-       $verifikasiUrl = rtrim((string) config('magang.verifikasi_url'), '/');
-            if ($verifikasiUrl === '' || empty($pengajuan->kode_verifikasi)) {
-                throw new RuntimeException('URL verifikasi atau kode verifikasi belum dikonfigurasi.');
-}
-$url = $verifikasiUrl . '/' . $pengajuan->kode_verifikasi;
+        $verifikasiUrl = rtrim((string) config('magang.verifikasi_url'), '/');
+        if ($verifikasiUrl === '' || empty($pengajuan->kode_verifikasi)) {
+            throw new RuntimeException('URL verifikasi atau kode verifikasi belum dikonfigurasi.');
+        }
+        $url = $verifikasiUrl . '/' . $pengajuan->kode_verifikasi;
 
         $qrCode = new QrCode(
             data: $url,

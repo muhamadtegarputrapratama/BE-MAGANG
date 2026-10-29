@@ -28,7 +28,9 @@ class PengajuanMagangResource extends JsonResource
             'berkas' => [
                 'bukti_spp'         => $this->file_bukti_spp !== null,
                 'surat_rekomendasi' => $this->file_surat_rekomendasi !== null,
+                'surat_magang'      => $this->file_surat_magang !== null,
             ],
+            'surat_magang_tersedia' => $this->status === StatusPengajuan::Setuju && ! empty($this->file_surat_magang),
             'diverifikasi_at' => $this->diverifikasi_at?->toIso8601String(),
             'dibuat_pada'     => $this->created_at->toIso8601String(),
         ];

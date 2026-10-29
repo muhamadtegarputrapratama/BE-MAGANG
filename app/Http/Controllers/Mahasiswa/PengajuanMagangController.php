@@ -56,6 +56,28 @@ class PengajuanMagangController extends Controller
         ]);
     }
 
+    /** Menampilkan atau mengunduh Surat Pengantar Magang yang sudah disetujui admin. */
+    public function suratMagang(Request $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        abort_unless(
+            $pengajuan->status === \App\Enums\StatusPengajuan::Setuju && $pengajuan->file_surat_magang,
+            404,
+            'Surat pengantar magang belum tersedia atau pengajuan belum disetujui.'
+        );
+
+        $disk = \Illuminate\Support\Facades\Storage::disk('local');
+        abort_unless($disk->exists($pengajuan->file_surat_magang), 404, 'File surat pengantar magang tidak ditemukan.');
+
+        $mode = $request->query('mode', 'preview');
+        $namaFile = "surat-pengantar-magang-{$pengajuan->id}.pdf";
+
+        return $mode === 'download'
+            ? $disk->download($pengajuan->file_surat_magang, $namaFile)
+            : $disk->response($pengajuan->file_surat_magang, $namaFile);
+    }
+
     public function tandaTangan(Request $request, PengajuanMagang $pengajuan)
     {
         $this->pastikanPemilik($request, $pengajuan);

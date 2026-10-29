@@ -27,9 +27,9 @@ class UserResource extends JsonResource
 
             'email' => $this->email,
 
-            // Role dibaca dari Spatie (admin_kpap, mahasiswa, dst.).
-            'role' => $this->role
-                ?? $this->getRoleNames()->first()
+            // Role dibaca dari Spatie (admin_kpap, mahasiswa, dst.), fallback ke kolom users.role.
+            'role' => $this->getRoleNames()->first()
+                ?? $this->role
                 ?? 'mahasiswa',
         ];
     }

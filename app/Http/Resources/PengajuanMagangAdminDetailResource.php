@@ -16,9 +16,9 @@ class PengajuanMagangAdminDetailResource extends PengajuanMagangAdminResource
             'catatan_revisi'  => $this->catatan_revisi,
             'nomor_surat'     => $this->nomor_surat,
             'diverifikasi_at' => $this->diverifikasi_at?->toIso8601String(),
-            'berkas'          => $this->daftarBerkas(),
-            'bukti_spp_url'         => $this->urlBerkas($this->file_bukti_spp, 'spp'),
-            'surat_rekomendasi_url' => $this->urlBerkas($this->file_surat_rekomendasi, 'rekomendasi'),
+            'berkas'                => $this->daftarBerkas(),
+            'bukti_spp_url'         => $this->urlBerkas('bukti-spp', 'preview'),
+            'surat_rekomendasi_url' => $this->urlBerkas('surat-rekomendasi', 'preview'),
         ]);
     }
 
@@ -50,16 +50,35 @@ class PengajuanMagangAdminDetailResource extends PengajuanMagangAdminResource
         return $hasil;
     }
 
-   private function urlBerkas(?string $path, string $jenis): ?string
-{
-    if (! $path) {
-        return null;
-    }
+    /** Link sementara (30 menit) yang bertanda tangan, aman dipakai di iframe atau download. */
+    private function urlBerkas(string $jenis, string $mode = 'preview'): ?string
+    {
+        $kolom = match ($jenis) {
+            'surat-pengajuan'                  => $this->file_surat_pengajuan,
+            'bukti-spp', 'spp'                 => $this->file_bukti_spp,
+            'surat-rekomendasi', 'rekomendasi' => $this->file_surat_rekomendasi,
+            'surat-magang'                     => $this->file_surat_magang,
+            default                            => null,
+        };
 
-    return URL::temporarySignedRoute(
-        'admin.pengajuan.berkas',
-        now()->addMinutes(30),
-        ['pengajuan' => $this->id, 'jenis' => $jenis, 'nama' => basename($path)]
-    );
-}
+        if (! $kolom) {
+            return null;
+        }
+
+        $jenisNormal = match ($jenis) {
+            'spp'         => 'bukti-spp',
+            'rekomendasi' => 'surat-rekomendasi',
+            default       => $jenis,
+        };
+
+        return URL::temporarySignedRoute(
+            'admin.pengajuan.berkas',
+            now()->addMinutes(30),
+            [
+                'pengajuan' => $this->id,
+                'jenis'     => $jenisNormal,
+                'mode'      => $mode,
+            ]
+        );
+    }
 }

@@ -19,6 +19,11 @@ class BerkasPengajuanController extends Controller
         'surat-magang'      => 'file_surat_magang',
     ];
 
+    private const ALIAS = [
+        'spp'         => 'bukti-spp',
+        'rekomendasi' => 'surat-rekomendasi',
+    ];
+
     public function tampil(Request $request, PengajuanMagang $pengajuan, string $jenis)
     {
         $mode = $request->query('mode', 'preview');
@@ -28,6 +33,8 @@ class BerkasPengajuanController extends Controller
             $mode  = $jenis;
             $jenis = (string) $request->query('nama', $request->query('jenis', ''));
         }
+
+        $jenis = self::ALIAS[$jenis] ?? $jenis;
 
         abort_unless(isset(self::BERKAS[$jenis]), 404, "Jenis berkas tidak dikenal: {$jenis}");
         abort_if($pengajuan->status === StatusPengajuan::Draft, 404, 'Pengajuan belum dikirim.');
