@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\PengajuanMagang;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Storage;
+use App\Support\Departemen;
 
 class VerifikasiSuratController extends Controller
 {
@@ -53,7 +54,7 @@ class VerifikasiSuratController extends Controller
                 // SESUAIKAN dengan nama kolom di tabel users milik temanmu
                 'nama'       => $pengajuan->user->name,
                 'nim'        => $pengajuan->user->nim,
-                'departemen' => $pengajuan->user->departemen,
+                'departemen' => Departemen::nama($pengajuan->user->departemen),
 
                 'instansi'               => $pengajuan->instansi,
                 'tanggal_ditandatangani' => $pengajuan->ditandatangani_at->toDateString(),

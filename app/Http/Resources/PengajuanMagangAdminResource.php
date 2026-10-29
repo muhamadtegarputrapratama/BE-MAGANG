@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\Departemen;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -13,9 +14,10 @@ class PengajuanMagangAdminResource extends JsonResource
             'id' => $this->id,
             'mahasiswa' => [
                 // SESUAIKAN dengan nama kolom di tabel users milik temanmu
-                'nama'       => $this->user->name,
-                'nim'        => $this->user->nim,
-                'departemen' => $this->user->departemen,
+                'nama'            => $this->user->name,
+                'nim'             => $this->user->nim,
+                'departemen'      => Departemen::nama($this->user->departemen),
+                'departemen_kode' => $this->user->departemen,
             ],
             'instansi'        => $this->instansi,
             'tanggal_mulai'   => $this->tanggal_mulai->toDateString(),

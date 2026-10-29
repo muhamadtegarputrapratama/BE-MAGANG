@@ -8,6 +8,7 @@ use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Support\Departemen;
 use RuntimeException;
 
 class SuratPengajuanService
@@ -62,7 +63,7 @@ class SuratPengajuanService
         $html = view('surat.pengajuan', [
             'nama' => $user->name,
             'nim' => $user->nim,
-            'departemen' => $user->departemen,
+            'departemen' => Departemen::nama($user->departemen),
 
             'fakultas' => config('magang.fakultas'),
             'kota' => config('magang.kota'),

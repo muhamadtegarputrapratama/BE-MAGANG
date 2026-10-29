@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\PengajuanMagang;
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use App\Support\Departemen;
 use Illuminate\Support\Facades\Storage;
 
 class SuratMagangService
@@ -37,7 +38,7 @@ class SuratMagangService
 
             'nama'       => $user->name,
             'nim'        => $user->nim,
-            'departemen' => $user->departemen,
+            'departemen' => Departemen::nama($user->departemen),
 
             'instansi'       => $pengajuan->instansi,
             'alamat'         => $pengajuan->alamat_instansi,
