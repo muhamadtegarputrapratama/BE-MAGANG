@@ -15,18 +15,35 @@ class Departemen
     }
 
     /**
-     * Kode departemen dari NIM, contoh: "E4419827364" -> "SVK".
-     * Dibaca dari huruf fakultas + digit pertama setelahnya (lihat config/nim_departemen.php).
-     * Mengembalikan null kalau NIM tidak dikenal.
+     * Nama lengkap untuk respons API. Akun tanpa departemen (misalnya admin)
+     * menghasilkan null, bukan "-".
      */
-    public static function dariNim(?string $nim): ?string
+    public static function namaDariKode(?string $kode): ?string
     {
-        $nim = strtoupper(trim((string) $nim));
-
-        if (! preg_match('/^([A-Z])(\d)/', $nim, $cocok)) {
+        if (! $kode) {
             return null;
         }
 
-        return config("nim_departemen.{$cocok[1]}.{$cocok[2]}");
+        return self::nama($kode);
+    }
+
+    /**
+     * Departemen dari prefix NIM (4 karakter pertama, contoh: "E441").
+     * Hasil: ['kode' => 'SVK', 'nama' => 'Silvikultur'], atau null kalau prefix tidak dikenal.
+     * Pemetaan prefix ada di config/nim_departemen.php.
+     */
+    public static function dariNim(?string $nim): ?array
+    {
+        $prefix = substr(strtoupper(trim((string) $nim)), 0, 4);
+        $kode = config("nim_departemen.{$prefix}");
+
+        if (! $kode) {
+            return null;
+        }
+
+        return [
+            'kode' => $kode,
+            'nama' => self::nama($kode),
+        ];
     }
 }

@@ -16,12 +16,21 @@ class UserResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'nim' => $this->nim,
-            'departemen' => [
-                'kode' => $this->departemen,
-                'nama' => Departemen::namaDariKode($this->departemen),
-            ],
+
+            // Admin tidak punya departemen, jadi dikirim null.
+            'departemen' => $this->departemen
+                ? [
+                    'kode' => $this->departemen,
+                    'nama' => Departemen::namaDariKode($this->departemen),
+                ]
+                : null,
+
             'email' => $this->email,
-            'role' => $this->role ?? 'mahasiswa',   
+
+            // Role dibaca dari Spatie (admin_kpap, mahasiswa, dst.).
+            'role' => $this->role
+                ?? $this->getRoleNames()->first()
+                ?? 'mahasiswa',
         ];
     }
 }

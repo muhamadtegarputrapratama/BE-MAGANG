@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -11,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
 
 class AuthController extends Controller
@@ -24,6 +26,12 @@ class AuthController extends Controller
 
         // Departemen ditentukan backend berdasarkan prefix NIM.
         $departemen = Departemen::dariNim($data['nim']);
+
+        if (! $departemen) {
+            throw ValidationException::withMessages([
+                'nim' => 'Departemen untuk NIM ini tidak dikenali.',
+            ]);
+        }
 
         $user = DB::transaction(function () use ($data, $departemen) {
             // Buat akun mahasiswa.
