@@ -18,10 +18,10 @@ class UserResource extends JsonResource
             'nim' => $this->nim,
             'departemen' => [
                 'kode' => $this->departemen,
-                'nama' => Departemen::namaDariKode($this->departemen),
+                'nama' => Departemen::nama($this->departemen),
             ],
             'email' => $this->email,
-            'role' => $this->role ?? 'mahasiswa',   
+            'role' => $this->role ?? 'mahasiswa',
         ];
     }
 }

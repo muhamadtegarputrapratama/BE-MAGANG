@@ -18,13 +18,14 @@ class AdminSeeder extends Seeder
         }
 
         $admin = User::firstOrNew(['email' => strtolower($email)]);
-           if ($admin->exists && $admin->role !== 'admin') {
+           if ($admin->exists && $admin->role !== 'admin_kpap') {
               $this->command->error('Email ini sudah dipakai akun non-admin. Pakai email lain di ADMIN_EMAIL.');
               return;
    }
         $admin->name = 'Administrator';
         $admin->password = $password; // di-hash otomatis oleh cast 'hashed'
-        $admin->role = 'admin';       // diisi langsung, bukan lewat fillable
+        $admin->role = 'admin_kpap';       // diisi langsung, bukan lewat fillable
+        $admin->assignRole('admin_kpap'); // pastikan role admin_kpap sudah ada di tabel roles
         $admin->save();
         $this->command->info('Akun admin siap: ' . $admin->email);
     }

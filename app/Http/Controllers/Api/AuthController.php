@@ -33,6 +33,7 @@ class AuthController extends Controller
                 'departemen' => $departemen['kode'],
                 'email' => $data['email'],
                 'password' => $data['password'],
+                'role' => 'mahasiswa',
             ]);
 
             // Ambil role mahasiswa dengan guard yang sesuai.

@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\PengajuanMagangController as AdminPengajuan;
 
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:10,1');
-Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+Route::post('/login', [AuthController::class, 'login'])->name('login')->middleware('throttle:5,1');
 
 // Verifikasi surat lewat QR
 Route::get('/verifikasi/{kode}', [VerifikasiSuratController::class, 'surat'])
@@ -50,8 +50,3 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::patch('/{pengajuan}/status', [AdminPengajuanController::class, 'ubahStatus']);
         });
 });
-
-Route::get(
-    '/admin/pengajuan-magang/{pengajuan}/berkas/{jenis}/{nama}',
-    [AdminPengajuan::class, 'tampil']
-)->name('admin.pengajuan.berkas')->middleware('signed');
