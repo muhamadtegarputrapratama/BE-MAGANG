@@ -1,8 +1,9 @@
 <?php
-
-return [
-    'MNH'  => 'Manajemen Hutan',
-    'THH'  => 'Teknologi Hasil Hutan',
-    'KSHE' => 'Konservasi Sumber Daya Hutan dan Ekowisata',
-    'SVK'  => 'Silvikultur',
-];
+    return [
+        'E' => [
+            '1' => 'MNH',
+            '2' => 'THH',
+            '3' => 'KSHE',
+            '4' => 'SVK',
+        ],
+    ];
