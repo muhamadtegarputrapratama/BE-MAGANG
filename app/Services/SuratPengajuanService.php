@@ -63,7 +63,7 @@ class SuratPengajuanService
         $html = view('surat.pengajuan', [
             'nama' => $user->name,
             'nim' => $user->nim,
-            'departemen' => Departemen::nama($user->departemen),
+            'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
 
             'fakultas' => config('magang.fakultas'),
             'kota' => config('magang.kota'),
@@ -106,21 +106,11 @@ class SuratPengajuanService
      */
     private function buatQr(PengajuanMagang $pengajuan): string
     {
-        $frontendUrl = rtrim(
-            (string) config('magang.frontend_url'),
-            '/'
-        );
-
-        if (
-            $frontendUrl === ''
-            || empty($pengajuan->kode_verifikasi)
-        ) {
-            throw new RuntimeException(
-                'URL frontend atau kode verifikasi belum dikonfigurasi.'
-            );
-        }
-
-        $url = rtrim(config('magang.verifikasi_url'), '/') . '/' . $pengajuan->kode_verifikasi;
+       $verifikasiUrl = rtrim((string) config('magang.verifikasi_url'), '/');
+            if ($verifikasiUrl === '' || empty($pengajuan->kode_verifikasi)) {
+                throw new RuntimeException('URL verifikasi atau kode verifikasi belum dikonfigurasi.');
+}
+$url = $verifikasiUrl . '/' . $pengajuan->kode_verifikasi;
 
         $qrCode = new QrCode(
             data: $url,

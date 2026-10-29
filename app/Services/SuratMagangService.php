@@ -38,7 +38,7 @@ class SuratMagangService
 
             'nama'       => $user->name,
             'nim'        => $user->nim,
-            'departemen' => Departemen::nama($user->departemen),
+           'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
 
             'instansi'       => $pengajuan->instansi,
             'alamat'         => $pengajuan->alamat_instansi,
