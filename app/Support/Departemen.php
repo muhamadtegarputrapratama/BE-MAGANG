@@ -5,8 +5,9 @@ namespace App\Support;
 class Departemen
 {
     /**
-     * Prefix NIM (4 karakter pertama) => kode departemen.
-     * Harus sejalan dengan regex NIM di RegisterRequest dan kunci di config/departemen.php.
+     * Prefix NIM (4 karakter pertama) => KODE departemen.
+     * Yang disimpan di users.departemen adalah kodenya; nama lengkap dibaca dari
+     * config/departemen.php saat ditampilkan (surat, API, dashboard).
      */
     private const PREFIX_NIM = [
         'E141' => 'MNH',
@@ -41,7 +42,6 @@ class Departemen
     /**
      * Departemen dari prefix NIM (4 karakter pertama, contoh: "E441").
      * Hasil: ['kode' => 'SVK', 'nama' => 'Silvikultur'], atau null kalau prefix tidak dikenal.
-     * Pemetaan prefix ada di konstanta PREFIX_NIM di atas.
      */
     public static function dariNim(?string $nim): ?array
     {

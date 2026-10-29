@@ -3,9 +3,10 @@
 namespace App\Services;
 
 use App\Models\PengajuanMagang;
+use App\Support\Departemen;
 use Dompdf\Dompdf;
 use Dompdf\Options;
-use App\Support\Departemen;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 
 class SuratMagangService
@@ -34,16 +35,17 @@ class SuratMagangService
             'fakultas'     => config('magang.fakultas'),
             'kota'         => config('magang.kota'),
             'nomor'        => $pengajuan->nomor_surat,
-            'tanggalSurat' => ($pengajuan->diverifikasi_at ?? now())->translatedFormat('j F Y'),
+            'tanggalSurat' => $this->tanggal($pengajuan->diverifikasi_at ?? now()),
 
             'nama'       => $user->name,
             'nim'        => $user->nim,
-           'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
+            // Nama lengkap departemen (Silvikultur, bukan SVK); kode ditampilkan jika tidak dikenal.
+            'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
 
             'instansi'       => $pengajuan->instansi,
             'alamat'         => $pengajuan->alamat_instansi,
-            'tanggalMulai'   => $pengajuan->tanggal_mulai->translatedFormat('j F Y'),
-            'tanggalSelesai' => $pengajuan->tanggal_selesai->translatedFormat('j F Y'),
+            'tanggalMulai'   => $this->tanggal($pengajuan->tanggal_mulai),
+            'tanggalSelesai' => $this->tanggal($pengajuan->tanggal_selesai),
 
             'jabatan'           => $penandatangan['jabatan'],
             'namaPenandatangan' => $penandatangan['nama'],
@@ -59,6 +61,12 @@ class SuratMagangService
         $dompdf->render();
 
         return $dompdf->output();
+    }
+
+    /** Tanggal berbahasa Indonesia, contoh: "29 Oktober 2026". */
+    private function tanggal($nilai): string
+    {
+        return Carbon::parse($nilai)->locale('id')->translatedFormat('j F Y');
     }
 
     /** Mengubah gambar di folder public menjadi data URI. Null jika belum ada. */
