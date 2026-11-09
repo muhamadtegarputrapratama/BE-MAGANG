@@ -11,8 +11,8 @@ class PengajuanMagangAdminDetailResource extends PengajuanMagangAdminResource
     {
         return array_merge(parent::toArray($request), [
             'alamat_instansi' => $this->alamat_instansi,
-            'tanggal_mulai'   => $this->tanggal_mulai->toDateString(),
-            'tanggal_selesai' => $this->tanggal_selesai->toDateString(),
+            'tanggal_mulai' => $this->tanggal_mulai?->toDateString(),
+            'tanggal_selesai' => $this->tanggal_selesai?->toDateString(),
             'catatan_revisi'  => $this->catatan_revisi,
             'nomor_surat'     => $this->nomor_surat,
             'diverifikasi_at' => $this->diverifikasi_at?->toIso8601String(),

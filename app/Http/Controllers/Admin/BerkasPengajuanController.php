@@ -37,7 +37,7 @@ class BerkasPengajuanController extends Controller
         $jenis = self::ALIAS[$jenis] ?? $jenis;
 
         abort_unless(isset(self::BERKAS[$jenis]), 404, "Jenis berkas tidak dikenal: {$jenis}");
-        abort_if($pengajuan->status === StatusPengajuan::Draft, 404, 'Pengajuan belum dikirim.');
+        abort_if($pengajuan->status === StatusPengajuan::Draft && $jenis !== 'surat-pengajuan', 404, 'Pengajuan belum dikirim.');
 
         $path = $pengajuan->{self::BERKAS[$jenis]};
 

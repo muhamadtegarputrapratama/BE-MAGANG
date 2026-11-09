@@ -12,14 +12,21 @@ use Illuminate\Support\Facades\Storage;
 class SuratMagangService
 {
     /** Membuat PDF surat pengantar magang dan menyimpannya. Mengembalikan path-nya. */
-    public function simpan(PengajuanMagang $pengajuan): string
-    {
-        $path = "pengajuan/{$pengajuan->id}/surat-magang.pdf";
+  public function simpan(PengajuanMagang $pengajuan): string
+{
+    $path = "pengajuan/{$pengajuan->id}/surat-magang.pdf";
 
-        Storage::disk('local')->put($path, $this->render($pengajuan));
+    $berhasil = Storage::disk('local')->put(
+        $path,
+        $this->render($pengajuan)
+    );
 
-        return $path;
+    if (! $berhasil) {
+        throw new \RuntimeException('Gagal menyimpan PDF surat pengantar magang.');
     }
+
+    return $path;
+}
 
     public function render(PengajuanMagang $pengajuan): string
     {
@@ -82,8 +89,18 @@ class SuratMagangService
             return null;
         }
 
-        $mime = mime_content_type($path) ?: 'image/png';
+       $mime = mime_content_type($path);
 
-        return 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($path));
+if (! in_array($mime, ['image/png', 'image/jpeg'], true)) {
+    return null;
+}
+
+$konten = file_get_contents($path);
+
+if ($konten === false) {
+    return null;
+}
+
+return 'data:' . $mime . ';base64,' . base64_encode($konten);
     }
 }
