@@ -9,8 +9,8 @@ class AdminSeeder extends Seeder
 {
     public function run(): void
     {
-        $email = env('ADMIN_EMAIL');
-        $password = env('ADMIN_PASSWORD');
+        $email = config('magang.admin.email');
+        $password = config('magang.admin.password');
 
         if (! $email || ! $password) {
             $this->command->error('ADMIN_EMAIL dan ADMIN_PASSWORD belum diisi di .env');

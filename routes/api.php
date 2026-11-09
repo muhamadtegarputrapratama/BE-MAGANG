@@ -11,7 +11,7 @@ Route::post('/register', [AuthController::class, 'register'])->middleware('throt
 Route::post('/login', [AuthController::class, 'login'])->name('login')->middleware('throttle:5,1');
 
 // Verifikasi surat lewat QR
-Route::get('/verifikasi/{kode}', [VerifikasiSuratController::class, 'surat'])
+Route::get('/verifikasi/{kode}', [VerifikasiSuratController::class, 'show'])
     ->where('kode', '[A-Za-z0-9]{32}')
     ->middleware('throttle:30,1');
 

@@ -13,10 +13,12 @@ class StorePengajuanMagangRequest extends FormRequest
 
     public function rules(): array
     {
+        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
+
         return [
             'instansi'        => ['required', 'string', 'max:255'],
             'alamat_instansi' => ['required', 'string', 'max:500'],
-            'tanggal_mulai'   => ['required', 'date', 'after_or_equal:today'],
+            'tanggal_mulai'   => ['required', 'date', $isUpdate ? 'after_or_equal:1900-01-01' : 'after_or_equal:today'],
             'tanggal_selesai' => ['required', 'date', 'after:tanggal_mulai'],
         ];
     }

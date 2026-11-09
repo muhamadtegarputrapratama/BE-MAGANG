@@ -40,4 +40,10 @@ return [
         // gambar tanda tangan di folder public. Kosong = ruang kosong untuk tanda tangan basah
         'ttd_path' => env('PENANDATANGAN_TTD'),
     ],
+
+    // Kredensial akun admin bawaan (dipakai oleh AdminSeeder)
+    'admin' => [
+        'email'    => env('ADMIN_EMAIL'),
+        'password' => env('ADMIN_PASSWORD'),
+    ],
 ];

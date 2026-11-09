@@ -29,7 +29,7 @@ class PengajuanMagangController extends Controller
             'status'     => ['nullable', Rule::in(['menunggu_verifikasi', 'setuju', 'revisi'])],
             'q'          => ['nullable', 'string', 'max:100'],
             'departemen' => ['nullable', 'string', 'max:100'],
-            'per_page'   => ['nullable', 'integer', 'min:1', 'max:20'],
+            'per_page'   => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $daftar = $this->urutkanNomorSurat($this->kueri($filter)->with('user'))
@@ -107,10 +107,10 @@ class PengajuanMagangController extends Controller
     }
 
     /**
-     * Urutkan berdasarkan angka di depan nomor surat ("8/IT3.F4/PK.01.06/2026" -> 8).
-     * Dibaca sebagai angka, bukan teks, supaya 10 tidak muncul sebelum 2.
-     * Pengajuan tanpa nomor surat ditaruh paling bawah, urut berdasarkan id
-     * (sama dengan urutan di frontend).
+     * Urutkan berdasarkan tahun surat (descending) lalu angka urut di depan nomor surat.
+     * Format: "8/IT3.F4/PK.01.06/2026" -> urut=8, tahun=2026.
+     * Angka dibaca numerik supaya 10 tidak muncul sebelum 2.
+     * Pengajuan tanpa nomor surat ditaruh paling bawah, urut berdasarkan id.
      */
     private function urutkanNomorSurat($query)
     {
@@ -120,8 +120,15 @@ class PengajuanMagangController extends Controller
             default  => "CAST(SUBSTRING_INDEX(nomor_surat, '/', 1) AS UNSIGNED)", // MySQL / MariaDB
         };
 
+        $tahun = match (DB::connection()->getDriverName()) {
+            'pgsql'  => "CAST(split_part(nomor_surat, '/', 4) AS INTEGER)",
+            'sqlite' => "CAST(substr(nomor_surat, instr(nomor_surat, '/') + 1) AS INTEGER)", // fallback: diverifikasi_at
+            default  => "CAST(SUBSTRING_INDEX(nomor_surat, '/', -1) AS UNSIGNED)", // MySQL / MariaDB
+        };
+
         return $query
             ->orderByRaw("CASE WHEN nomor_surat IS NULL OR nomor_surat = '' THEN 1 ELSE 0 END")
+            ->orderByRaw("{$tahun} DESC")
             ->orderByRaw("{$angka} ASC")
             ->orderBy('id');
     }

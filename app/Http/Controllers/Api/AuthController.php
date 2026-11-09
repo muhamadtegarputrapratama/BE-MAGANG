@@ -44,8 +44,8 @@ class AuthController extends Controller
                 'role' => 'mahasiswa',
             ]);
 
-            // Ambil role mahasiswa dengan guard yang sesuai.
-            $role = Role::findByName('mahasiswa', 'web');
+            // Ambil atau buat role mahasiswa dengan guard yang sesuai.
+            $role = Role::findOrCreate('mahasiswa', 'web');
 
             // Hubungkan role Spatie secara otomatis.
             $user->assignRole($role);
