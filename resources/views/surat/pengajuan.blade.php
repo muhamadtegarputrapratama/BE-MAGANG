@@ -159,8 +159,7 @@
     <div class="lampiran">
         <table>
             <tr>
-                <td style="width: 200px;">Dokumen persyaratan yang dilampirkan</td>
-                <td style="width: 14px;">:</td>
+                <td style="width: 300px;">Dokumen persyaratan yang dilampirkan :</td>
                 <td>
                     1. Rekomendasi dari pembimbing akademik<br>
                     2. Bukti SPP
