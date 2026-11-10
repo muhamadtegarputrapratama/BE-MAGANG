@@ -122,7 +122,7 @@ class PengajuanMagangController extends Controller
 
         $tahun = match (DB::connection()->getDriverName()) {
             'pgsql'  => "CAST(split_part(nomor_surat, '/', 4) AS INTEGER)",
-            'sqlite' => "CAST(substr(nomor_surat, instr(nomor_surat, '/') + 1) AS INTEGER)", // fallback: diverifikasi_at
+            'sqlite' => "CAST(substr(nomor_surat, -4) AS INTEGER)", // 4 digit tahun di akhir nomor surat
             default  => "CAST(SUBSTRING_INDEX(nomor_surat, '/', -1) AS UNSIGNED)", // MySQL / MariaDB
         };
 
@@ -151,6 +151,7 @@ class PengajuanMagangController extends Controller
                 $query->where(function ($query) use ($kata) {
                     $query->where('instansi', 'like', "%{$kata}%")
                         ->orWhere('nomor_surat', 'like', "%{$kata}%")
+                        ->orWhere('nama', 'like', "%{$kata}%")
                         // SESUAIKAN nama kolom users (name, nim)
                         ->orWhereHas('user', fn($user) => $user
                             ->where('name', 'like', "%{$kata}%")

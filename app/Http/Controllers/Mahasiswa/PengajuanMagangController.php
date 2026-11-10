@@ -28,9 +28,10 @@ class PengajuanMagangController extends Controller
 
     public function store(StorePengajuanMagangRequest $request)
     {
-        // Satu pengajuan berjalan per mahasiswa: yang perlu revisi diperbaiki, bukan dibuat ulang.
+        // Satu pengajuan berjalan per mahasiswa: draft diselesaikan/diperbaiki, bukan dibuat ulang.
         $berjalan = PengajuanMagang::where('user_id', $request->user()->id)
             ->whereIn('status', [
+                StatusPengajuan::Draft->value,
                 StatusPengajuan::MenungguVerifikasi->value,
                 StatusPengajuan::Revisi->value,
             ])
@@ -38,8 +39,8 @@ class PengajuanMagangController extends Controller
 
         if ($berjalan) {
             throw ValidationException::withMessages([
-                'pengajuan' => 'Kamu masih memiliki pengajuan yang sedang diproses atau perlu direvisi. '
-                    . 'Perbaiki pengajuan tersebut atau tunggu hasil verifikasinya.',
+                'pengajuan' => 'Kamu masih memiliki pengajuan yang aktif (draft, sedang diproses, atau perlu direvisi). '
+                    . 'Selesaikan atau perbaiki pengajuan tersebut sebelum membuat pengajuan baru.',
             ]);
         }
 

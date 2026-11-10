@@ -52,13 +52,13 @@ class VerifikasiSuratController extends Controller
             'valid' => true,
             'data'  => [
                 // SESUAIKAN dengan nama kolom di tabel users milik temanmu
-                'nama'       => $pengajuan->user->name,
-                'nim'        => $pengajuan->user->nim,
-                'departemen' => Departemen::nama($pengajuan->user->departemen),
+                'nama'       => $pengajuan->user?->name ?? $pengajuan->nama,
+                'nim'        => $pengajuan->user?->nim,
+                'departemen' => Departemen::nama($pengajuan->user?->departemen),
 
                 'instansi'               => $pengajuan->instansi,
-                'tanggal_ditandatangani' => $pengajuan->ditandatangani_at->toDateString(),
-                'status'                 => $pengajuan->status->label(),
+                'tanggal_ditandatangani' => $pengajuan->ditandatangani_at?->toDateString(),
+                'status'                 => $pengajuan->status?->label(),
             ],
         ]);
     }
