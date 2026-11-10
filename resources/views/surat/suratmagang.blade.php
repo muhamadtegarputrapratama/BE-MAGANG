@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 
@@ -7,7 +8,8 @@
 
     <style>
         @page {
-            margin: 1.3cm 2.3cm 2.2cm 2.3cm;
+            size: A4;
+            margin: 1.2cm 1.8cm 2cm 1.8cm;
         }
 
         * {
@@ -16,23 +18,47 @@
 
         body {
             font-family: "DejaVu Sans", Arial, Helvetica, sans-serif;
-            font-size: 11pt;
-            line-height: 1.45;
-            color: #0f172a;
+            font-size: 10.5pt;
+            line-height: 1.4;
+            color: #111111;
+        }
+
+        /* =========================
+           ORNAMEN SISI KIRI
+        ========================= */
+
+        .ornamen {
+            position: fixed;
+            left: 0.15cm;
+            top: 4.2cm;
+            width: 0.45cm;
+            height: 14.5cm;
+            background: #d1d5db;
+        }
+
+        .ornamen-biru {
+            position: absolute;
+            bottom: 2.2cm;
+            left: 0;
+            width: 100%;
+            height: 5cm;
+            background: #7da7d9;
         }
 
 
+        /* =========================
+           KOP SURAT
+        ========================= */
 
         table.kop {
             width: 100%;
             border-collapse: collapse;
-            border-bottom: 2px solid #1e3a8a;
-            margin-bottom: 26px;
+            margin-bottom: 34px;
         }
 
         table.kop td {
             vertical-align: middle;
-            padding: 0 0 10px 0;
+            padding: 0;
         }
 
         td.kop-logo {
@@ -46,12 +72,13 @@
         }
 
         td.kop-teks {
-            width: 58%;
+            width: 57%;
             text-align: left;
+            padding-left: 5px;
         }
 
         .k1 {
-            font-size: 7.5pt;
+            font-size: 8pt;
             font-weight: bold;
             line-height: 1.2;
             margin-bottom: 2px;
@@ -59,7 +86,7 @@
         }
 
         .k2 {
-            font-size: 15pt;
+            font-size: 17pt;
             font-weight: bold;
             line-height: 1.1;
             margin-bottom: 3px;
@@ -70,25 +97,29 @@
             font-size: 8.5pt;
             font-weight: bold;
             line-height: 1.2;
-            color: #334155;
+            color: #000000;
         }
 
         td.kop-kontak {
-            width: 42%;
+            width: 37%;
             vertical-align: middle;
             text-align: left;
-            font-size: 7pt;
+            font-size: 7.2pt;
             line-height: 1.4;
-            color: #334155;
-            padding-left: 12px;
+            color: #222222;
+            padding-left: 14px !important;
+            border-left: 1px solid #999999;
         }
 
 
+        /* =========================
+           NOMOR DAN TANGGAL SURAT
+        ========================= */
 
         table.meta {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 14px;
+            margin-bottom: 18px;
         }
 
         table.meta td {
@@ -97,27 +128,35 @@
         }
 
         td.l {
-            width: 60px;
+            width: 90px;
         }
 
         td.t {
-            width: 14px;
+            width: 20px;
         }
 
         td.r {
             text-align: right;
-            width: 190px;
+            width: 200px;
+            white-space: nowrap;
         }
 
 
+        /* =========================
+           ISI SURAT
+        ========================= */
 
         p {
             margin: 0 0 10px 0;
             text-align: justify;
         }
 
+        .tujuan {
+            margin-bottom: 20px;
+        }
+
         table.mhs {
-            margin: 4px 0 12px 20px;
+            margin: 4px 0 14px 20px;
             border-collapse: collapse;
         }
 
@@ -127,54 +166,83 @@
         }
 
 
+        /* =========================
+           TANDA TANGAN
+        ========================= */
 
         table.ttd {
             width: 100%;
-            margin-top: 22px;
+            margin-top: 34px;
             page-break-inside: avoid;
         }
 
+        table.ttd td {
+            vertical-align: top;
+        }
+
         .ttd-ruang {
-            height: 70px;
+            height: 75px;
         }
 
         .ttd-gambar {
-            height: 70px;
+            height: 75px;
             max-width: 180px;
             object-fit: contain;
         }
 
+        .ttd-nama {
+            white-space: nowrap;
+        }
 
+
+        /* =========================
+           FOOTER
+        ========================= */
 
         .footer {
             position: fixed;
             left: 0;
             right: 0;
-            bottom: -1.5cm;
+            bottom: -1.35cm;
             text-align: center;
-            font-size: 11pt;
-            color: #444;
+            font-size: 9pt;
+            color: #555555;
         }
+
     </style>
 </head>
 
 <body>
 
+    {{-- ORNAMEN KIRI --}}
+    <div class="ornamen">
+        <div class="ornamen-biru"></div>
+    </div>
 
+
+    {{-- FOOTER --}}
     <div class="footer">
         {{ $kop['slogan'] }}
     </div>
 
 
+    {{-- =========================
+         KOP SURAT
+    ========================== --}}
+
     <table class="kop">
         <tr>
+
+            {{-- LOGO --}}
             <td class="kop-logo">
                 @if ($logo)
                     <img src="{{ $logo }}" alt="Logo IPB">
                 @endif
             </td>
 
+            {{-- IDENTITAS INSTITUSI --}}
             <td class="kop-teks">
+
                 <div class="k1">
                     {{ $kop['kementerian'] }}
                 </div>
@@ -186,22 +254,33 @@
                 <div class="k3">
                     {{ strtoupper($fakultas) }}
                 </div>
+
             </td>
 
+            {{-- KONTAK --}}
             <td class="kop-kontak">
+
                 @foreach ($kop['kontak'] as $baris)
                     {{ $baris }}<br>
                 @endforeach
+
             </td>
+
         </tr>
     </table>
 
 
+    {{-- =========================
+         NOMOR DAN TANGGAL
+    ========================== --}}
+
     <table class="meta">
+
         <tr>
             <td class="l">Nomor</td>
             <td class="t">:</td>
             <td>{{ $nomor }}</td>
+
             <td class="r">
                 {{ $kota }}, {{ $tanggalSurat }}
             </td>
@@ -212,14 +291,23 @@
             <td class="t">:</td>
             <td colspan="2">Pengantar Magang</td>
         </tr>
+
     </table>
 
 
-    <p>
+    {{-- =========================
+         ALAMAT TUJUAN
+    ========================== --}}
+
+    <p class="tujuan">
         Yth. Direktur {{ $instansi }}<br>
         {{ $alamat }}
     </p>
 
+
+    {{-- =========================
+         PEMBUKA SURAT
+    ========================== --}}
 
     <p>
         Dalam rangka meningkatkan keterampilan dan pemahaman mahasiswa
@@ -229,7 +317,12 @@
     </p>
 
 
+    {{-- =========================
+         DATA MAHASISWA
+    ========================== --}}
+
     <table class="mhs">
+
         <tr>
             <td style="width: 90px;">Nama</td>
             <td style="width: 14px;">:</td>
@@ -247,8 +340,13 @@
             <td>:</td>
             <td>{{ $departemen }}</td>
         </tr>
+
     </table>
 
+
+    {{-- =========================
+         ISI SURAT
+    ========================== --}}
 
     <p>
         Bermaksud untuk melaksanakan Magang di {{ $instansi }}
@@ -262,25 +360,48 @@
     </p>
 
 
+    {{-- =========================
+         TANDA TANGAN
+    ========================== --}}
+
     <table class="ttd">
+
         <tr>
-            <td style="width: 50%;"></td>
+
+            <td style="width: 52%;"></td>
 
             <td>
+
                 @foreach ($jabatan as $baris)
                     {{ $baris }}<br>
                 @endforeach
 
                 @if ($ttd)
-                    <img class="ttd-gambar" src="{{ $ttd }}" alt="Tanda tangan">
+
+                    <img
+                        class="ttd-gambar"
+                        src="{{ $ttd }}"
+                        alt="Tanda tangan"
+                    >
+
                 @else
+
                     <div class="ttd-ruang"></div>
+
                 @endif
 
-                {{ $namaPenandatangan }}<br>
-                NIP {{ $nip }}
+                <div class="ttd-nama">
+                    {{ $namaPenandatangan }}
+                </div>
+
+                <div>
+                    NIP {{ $nip }}
+                </div>
+
             </td>
+
         </tr>
+
     </table>
 
 </body>
