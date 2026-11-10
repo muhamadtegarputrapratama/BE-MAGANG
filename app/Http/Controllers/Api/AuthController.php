@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
+use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -23,6 +24,12 @@ class AuthController extends Controller
     public function register(RegisterRequest $request): JsonResponse
     {
         $data = $request->validated();
+
+        $data['name'] = preg_replace_callback(
+       "/(^|[\s'-])([\p{L}])/u",
+          fn ($matches) => $matches[1] . mb_strtoupper($matches[2]),
+          mb_strtolower($data['name'])
+);
 
         // Departemen ditentukan backend berdasarkan prefix NIM.
         $departemen = Departemen::dariNim($data['nim']);

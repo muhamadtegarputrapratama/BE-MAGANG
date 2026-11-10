@@ -21,8 +21,8 @@ class PengajuanMagangService
         $pengajuan = new PengajuanMagang();
 
 
-        $pengajuan->instansi = $data['instansi'];
-        $pengajuan->alamat_instansi = $data['alamat_instansi'];
+        $pengajuan->instansi = $this->formatNama($data['instansi']);
+        $pengajuan->alamat_instansi = $this->formatNama($data['alamat_instansi']);
         $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
         $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
@@ -41,14 +41,15 @@ class PengajuanMagangService
     PengajuanMagang $pengajuan,
     array $data
 ): PengajuanMagang {
+
     $this->pastikanBisaDiedit($pengajuan);
 
     // Simpan path lama terlebih dahulu.
     $fileLama = $pengajuan->file_surat_pengajuan;
 
     // Perbarui hanya kolom yang boleh diubah mahasiswa.
-    $pengajuan->instansi = $data['instansi'];
-    $pengajuan->alamat_instansi = $data['alamat_instansi'];
+    $pengajuan->instansi = $this->formatNama($data['instansi']);
+    $pengajuan->alamat_instansi = $this->formatNama($data['alamat_instansi']);
     $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
     $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
@@ -237,6 +238,17 @@ class PengajuanMagangService
     }
 
     return $pengajuan->refresh();
+}
+
+private function formatNama(string $value): string
+{
+    $value = mb_strtolower(trim($value));
+
+    return preg_replace_callback(
+        "/(^|[\s'-])([\p{L}])/u",
+        fn ($matches) => $matches[1] . mb_strtoupper($matches[2]),
+        $value
+    );
 }
 
     private function pastikanBisaDiedit(PengajuanMagang $pengajuan): void
