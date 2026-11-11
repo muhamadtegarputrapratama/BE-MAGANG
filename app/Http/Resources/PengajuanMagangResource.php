@@ -16,6 +16,7 @@ class PengajuanMagangResource extends JsonResource
             'alamat_instansi' => $this->alamat_instansi,
             'tanggal_mulai'   => $this->tanggal_mulai?->toDateString(),
             'tanggal_selesai' => $this->tanggal_selesai?->toDateString(),
+            'anggota' => $this->anggota,
             'status' => [
                 'value' => $this->status->value,
                 'label' => $this->status->label(),

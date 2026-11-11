@@ -124,17 +124,39 @@
 
 <body>
 
-    @php
-        $daftar  = array_values($anggota);
-        $banyak  = count($daftar) > 1;
-        $pengaju = $daftar[0] ?? ['nama' => '-', 'nim' => '-', 'departemen' => '-'];
+ @php
+    $pengaju = [
+        'nama' => $nama ?? '-',
+        'nim' => $nim ?? '-',
+        'departemen' => $departemen ?? '-',
+    ];
 
-        // Departemen unik, urut sesuai kemunculan (satu departemen bisa dipakai banyak mahasiswa)
-        $deptList = collect($daftar)->pluck('departemen')->filter()->unique()->values();
+    $anggota = is_array($anggota ?? null) ? $anggota : [];
 
-        // Lampiran bisa diubah dari controller/service; default sesuai contoh surat
-        $daftarLampiran = $lampiran ?? ['Surat Rekomendasi Dosen Pembimbing Magang'];
-    @endphp
+    $anggotaTambahan = collect($anggota)
+        ->filter(function ($item) use ($pengaju) {
+            return ($item['nim'] ?? '') !== $pengaju['nim'];
+        })
+        ->values()
+        ->all();
+
+    $daftar = array_merge(
+        [$pengaju],
+        $anggotaTambahan
+    );
+
+    $banyak = count($daftar) > 1;
+
+    $deptList = collect($daftar)
+        ->pluck('departemen')
+        ->filter()
+        ->unique()
+        ->values();
+
+    $daftarLampiran = $lampiran ?? [
+        'Surat Rekomendasi Dosen Pembimbing Magang'
+    ];
+@endphp
 
 
     <h1>FORM PENGAJUAN MAGANG MANDIRI</h1>

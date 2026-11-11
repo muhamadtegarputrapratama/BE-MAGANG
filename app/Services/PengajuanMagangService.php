@@ -16,51 +16,62 @@ class PengajuanMagangService
 {
     public function __construct(private SuratPengajuanService $surat) {}
 
-    public function buatDraft(User $user, array $data): PengajuanMagang
-    {
-        $pengajuan = new PengajuanMagang();
+   public function buatDraft(User $user, array $data): PengajuanMagang
+{
+    $pengajuan = new PengajuanMagang();
 
+    $pengajuan->instansi = $this->formatNama($data['instansi']);
+    $pengajuan->alamat_instansi = $this->formatNama($data['alamat_instansi']);
+    $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+    $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
-        $pengajuan->instansi = $this->formatNama($data['instansi']);
-        $pengajuan->alamat_instansi = $this->formatNama($data['alamat_instansi']);
-        $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
-        $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+    $pengajuan->user_id = $user->id;
+    $pengajuan->nama = $user->name;
 
+    // Simpan ketua dan anggota kelompok.
+    $pengajuan->anggota = $this->susunAnggota(
+        $user,
+        $data['anggota'] ?? []
+    );
 
-        $pengajuan->user_id = $user->id;
-        $pengajuan->nama = $user->name;
-        $pengajuan->status = StatusPengajuan::Draft;
-        $pengajuan->kode_verifikasi = Str::random(32);
+    $pengajuan->status = StatusPengajuan::Draft;
+    $pengajuan->kode_verifikasi = Str::random(32);
 
-        $pengajuan->save();
+    $pengajuan->save();
 
-        return $pengajuan;
-    }
+    return $pengajuan;
+}
 
-    public function perbarui(
+   public function perbarui(
     PengajuanMagang $pengajuan,
     array $data
 ): PengajuanMagang {
 
     $this->pastikanBisaDiedit($pengajuan);
 
-    // Simpan path lama terlebih dahulu.
     $fileLama = $pengajuan->file_surat_pengajuan;
 
-    // Perbarui hanya kolom yang boleh diubah mahasiswa.
     $pengajuan->instansi = $this->formatNama($data['instansi']);
     $pengajuan->alamat_instansi = $this->formatNama($data['alamat_instansi']);
     $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
     $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
-    // Perubahan data membatalkan tanda tangan sebelumnya.
+    // Perbarui anggota jika dikirim.
+    if (array_key_exists('anggota', $data)) {
+        $pengajuan->loadMissing('user');
+
+        $pengajuan->anggota = $this->susunAnggota(
+            $pengajuan->user,
+            $data['anggota']
+        );
+    }
+
+    // Batalkan tanda tangan sebelumnya.
     $pengajuan->ditandatangani_at = null;
     $pengajuan->file_surat_pengajuan = null;
 
-    // Simpan database dahulu.
     $pengajuan->save();
 
-    // Hapus file lama setelah database berhasil diperbarui.
     if ($fileLama) {
         $this->hapusFile($fileLama);
     }
@@ -238,6 +249,35 @@ class PengajuanMagangService
     }
 
     return $pengajuan->refresh();
+}
+
+private function susunAnggota(User $user, array $anggotaTambahan): array
+{
+    $anggota = [
+        [
+            'user_id' => $user->id,
+            'nama' => $user->name,
+            'nim' => $user->nim,
+            'departemen' => $user->departemen,
+        ],
+    ];
+
+    foreach ($anggotaTambahan as $member) {
+        if ($member['nim'] === $user->nim) {
+            throw ValidationException::withMessages([
+                'anggota' => 'NIM ketua kelompok tidak perlu dimasukkan kembali.',
+            ]);
+        }
+
+        $anggota[] = [
+            'user_id' => null,
+            'nama' => $this->formatNama($member['nama']),
+            'nim' => $member['nim'],
+            'departemen' => $member['departemen'],
+        ];
+    }
+
+    return $anggota;
 }
 
 private function formatNama(string $value): string

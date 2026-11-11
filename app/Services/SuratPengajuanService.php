@@ -45,56 +45,66 @@ class SuratPengajuanService
      * Membuat isi PDF.
      * Tanpa QR digunakan untuk preview sebelum tanda tangan.
      */
-    public function render(
-        PengajuanMagang $pengajuan,
-        bool $denganQr
-    ): string {
-        $pengajuan->loadMissing('user');
 
-        $user = $pengajuan->user;
+public function render(PengajuanMagang $pengajuan, bool $denganQr): string
+{
+    $pengajuan->loadMissing('user');
 
-        // Pastikan pengajuan memiliki pengguna.
-        if (! $user) {
-            throw new RuntimeException(
-                'Data mahasiswa untuk surat pengajuan tidak ditemukan.'
-            );
-        }
+    $user = $pengajuan->user;
 
-        // Siapkan data untuk template surat.
-        $html = view('surat.pengajuan', [
-            'nama' => $user->name,
-            'nim' => $user->nim,
-            'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
-
-            'fakultas' => config('magang.fakultas'),
-            'kota' => config('magang.kota'),
-
-            'instansi' => $pengajuan->instansi,
-            'alamat' => $pengajuan->alamat_instansi,
-
-            'tanggalMulai' => $this->tanggal($pengajuan->tanggal_mulai),
-            'tanggalSelesai' => $this->tanggal($pengajuan->tanggal_selesai),
-            'tanggalSurat' => $this->tanggal($pengajuan->ditandatangani_at ?? now()),
-
-            'qr' => $denganQr
-                ? $this->buatQr($pengajuan)
-                : null,
-        ])->render();
-
-        // Konfigurasi Dompdf.
-        $options = new Options();
-
-        // Nonaktifkan akses sumber daya remote.
-        $options->set('isRemoteEnabled', false);
-
-        $dompdf = new Dompdf($options);
-
-        $dompdf->loadHtml($html);
-        $dompdf->setPaper('A4', 'portrait');
-        $dompdf->render();
-
-        return $dompdf->output();
+    if (!$user) {
+        throw new \RuntimeException(
+            'Data mahasiswa pemilik pengajuan tidak ditemukan.'
+        );
     }
+
+    // Ambil anggota yang tersimpan di database.
+    $anggota = $pengajuan->anggota ?? [];
+
+    // Jika belum ada anggota, gunakan data mahasiswa pemilik pengajuan.
+    if (empty($anggota)) {
+        $anggota = [
+            [
+                'nama' => $user->name,
+                'nim' => $user->nim,
+                'departemen' => $user->departemen,
+            ],
+        ];
+    }
+
+    $html = view('surat.pengajuan', [
+        'anggota' => $anggota,
+        'nama' => $user->name,
+        'nim' => $user->nim,
+        'departemen' => $user->departemen,
+
+        'fakultas' => config('magang.fakultas'),
+        'kota' => config('magang.kota'),
+
+        'instansi' => $pengajuan->instansi,
+        'alamat' => $pengajuan->alamat_instansi,
+
+        'tanggalMulai' => $this->tanggal($pengajuan->tanggal_mulai),
+        'tanggalSelesai' => $this->tanggal($pengajuan->tanggal_selesai),
+
+        'tanggalSurat' => $this->tanggal(
+            $pengajuan->ditandatangani_at ?? now()
+        ),
+
+        'qr' => $denganQr ? $this->buatQr($pengajuan) : null,
+    ])->render();
+
+    $options = new Options();
+    $options->set('isRemoteEnabled', false);
+
+    $dompdf = new Dompdf($options);
+    $dompdf->loadHtml($html);
+    $dompdf->setPaper('A4', 'portrait');
+    $dompdf->render();
+
+    return $dompdf->output();
+}
+
 
     /** Tanggal berbahasa Indonesia, contoh: "29 Oktober 2026". */
     private function tanggal($nilai): string
