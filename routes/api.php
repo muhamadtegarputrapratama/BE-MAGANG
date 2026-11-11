@@ -41,13 +41,20 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/{pengajuan}/kirim', [MahasiswaPengajuanController::class, 'kirim']);
         });
 
-    // ----- Admin KPAP -----
-    Route::middleware('role:admin_kpap')
-        ->prefix('admin/pengajuan-magang')
-        ->group(function () {
-            Route::get('/', [AdminPengajuanController::class, 'index']);
-            Route::get('/ringkasan', [AdminPengajuanController::class, 'ringkasan']);
-            Route::get('/{pengajuan}', [AdminPengajuanController::class, 'show']);
-            Route::patch('/{pengajuan}/status', [AdminPengajuanController::class, 'ubahStatus']);
-        });
+  // ----- Admin KPAP -----
+Route::middleware('role:admin_kpap')
+    ->prefix('admin/pengajuan-magang')
+    ->group(function () {
+        Route::get('/', [AdminPengajuanController::class, 'index']);
+
+        Route::get('/ringkasan', [AdminPengajuanController::class, 'ringkasan']);
+
+        Route::get('/{pengajuan}', [AdminPengajuanController::class, 'show']);
+
+        // Edit data pengajuan
+        Route::patch('/{pengajuan}', [AdminPengajuanController::class, 'update']);
+
+        // Ubah status pengajuan
+        Route::patch('/{pengajuan}/status', [AdminPengajuanController::class, 'ubahStatus']);
+    });
 });

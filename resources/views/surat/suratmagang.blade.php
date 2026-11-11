@@ -195,18 +195,7 @@
             white-space: nowrap;
         }
 
-        .footer {
-            position: fixed;
-            left: 0;
-            right: 0;
-            bottom: -1.35cm;
-            padding-top: 5pt;
-            border-top: 2pt solid #1f56a5;   /* garis biru */
-            text-align: center;
-            font-family: Helvetica, Arial, sans-serif;
-            font-size: 9.7pt;
-            color: #333333;
-        }
+     
 
     </style>
 </head>

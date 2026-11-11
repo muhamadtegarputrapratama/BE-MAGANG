@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\StatusPengajuan;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UbahStatusPengajuanRequest;
+use App\Http\Requests\Admin\UpdatePengajuanMagangRequest;
 use App\Http\Resources\PengajuanMagangAdminDetailResource;
 use App\Http\Resources\PengajuanMagangAdminResource;
 use App\Models\PengajuanMagang;
@@ -66,7 +67,7 @@ class PengajuanMagangController extends Controller
             ->map(fn($kode) => ['kode' => $kode, 'nama' => Departemen::nama($kode)])
             ->sortBy('nama')
             ->values();
-            
+
         return response()->json([
             'data' => [
                 'menunggu_verifikasi' => (int) ($hitung['menunggu_verifikasi'] ?? 0),
@@ -84,6 +85,41 @@ class PengajuanMagangController extends Controller
 
         return new PengajuanMagangAdminDetailResource($pengajuan->load('user'));
     }
+
+    /**
+ * Admin mengedit data pengajuan magang.
+ */
+public function update(
+    UpdatePengajuanMagangRequest $request,
+    PengajuanMagang $pengajuan
+) {
+    // Draft tidak bisa diedit melalui halaman admin.
+    abort_if(
+        $pengajuan->status === StatusPengajuan::Draft,
+        404
+    );
+
+    // Pengajuan yang sudah disetujui tidak boleh diedit
+    // karena surat dan tanda tangan mungkin sudah diterbitkan.
+    abort_if(
+        !in_array(
+            $pengajuan->status->value,
+            ['menunggu_verifikasi', 'revisi'],
+            true
+        ),
+        403,
+        'Pengajuan yang sudah disetujui tidak dapat diedit.'
+    );
+
+    $pengajuan->fill($request->validated());
+    $pengajuan->save();
+
+    return (new PengajuanMagangAdminDetailResource(
+        $pengajuan->load('user')
+    ))->additional([
+        'message' => 'Data pengajuan magang berhasil diperbarui.',
+    ]);
+}
 
     /** Admin memutuskan: setuju atau revisi (catatan wajib saat revisi). */
     public function ubahStatus(UbahStatusPengajuanRequest $request, PengajuanMagang $pengajuan)
@@ -151,7 +187,6 @@ class PengajuanMagangController extends Controller
                 $query->where(function ($query) use ($kata) {
                     $query->where('instansi', 'like', "%{$kata}%")
                         ->orWhere('nomor_surat', 'like', "%{$kata}%")
-                        ->orWhere('nama', 'like', "%{$kata}%")
                         // SESUAIKAN nama kolom users (name, nim)
                         ->orWhereHas('user', fn($user) => $user
                             ->where('name', 'like', "%{$kata}%")
