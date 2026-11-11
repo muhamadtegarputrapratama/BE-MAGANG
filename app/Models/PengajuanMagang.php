@@ -10,17 +10,19 @@ class PengajuanMagang extends Model
 {
     protected $table = 'pengajuan_magang';
 
-   protected $fillable = [
-    'instansi',
-    'alamat_instansi',
-    'tanggal_mulai',
-    'tanggal_selesai',
-];
+    protected $fillable = [
+        'instansi',
+        'alamat_instansi',
+        'tanggal_mulai',
+        'tanggal_selesai',
+        'anggota',
+    ];
 
     protected function casts(): array
     {
         return [
             'status' => StatusPengajuan::class,
+            'anggota' => 'array',
             'tanggal_mulai' => 'date',
             'tanggal_selesai' => 'date',
             'diverifikasi_at' => 'datetime',

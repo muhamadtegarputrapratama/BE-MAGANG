@@ -8,7 +8,8 @@ return [
 
     'fakultas' => 'Fakultas Kehutanan dan Lingkungan',
     'kota'     => 'Bogor',
-
+    'maks_anggota' => 10,
+ 
     // Nomor surat pengantar magang. {urut} naik otomatis, {tahun} tahun saat disetujui.
     'nomor_surat' => [
         'format'     => '{urut}/IT3.F4/PK.01.06/{tahun}',
