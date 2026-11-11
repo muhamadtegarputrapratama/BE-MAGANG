@@ -97,12 +97,6 @@ class StorePengajuanMagangRequest extends FormRequest
                 'regex:/^[A-Za-z][0-9]{10}$/',
                 'distinct:ignore_case',
             ],
-
-            'anggota.*.departemen' => [
-                'required',
-                'string',
-                'max:100',
-            ],
         ];
     }
 
@@ -143,7 +137,6 @@ class StorePengajuanMagangRequest extends FormRequest
             'anggota' => 'anggota kelompok',
             'anggota.*.nama' => 'nama anggota',
             'anggota.*.nim' => 'NIM anggota',
-            'anggota.*.departemen' => 'departemen anggota',
         ];
     }
 }

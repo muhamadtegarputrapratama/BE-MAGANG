@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use App\Support\Departemen;
 use Throwable;
 
 class PengajuanMagangService
@@ -305,46 +306,57 @@ class PengajuanMagangService
      * Menyusun daftar kelompok: ketua selalu di urutan pertama, lalu anggota tambahan.
      * Total dibatasi config('magang.maks_anggota') (default 10, termasuk ketua).
      */
-    private function susunAnggota(User $user, ?array $anggotaTambahan): array
-    {
-        $nimKetua = strtoupper((string) $user->nim);
 
-        $anggota = [
-            [
-                'user_id' => $user->id,
-                'nama' => $user->name,
-                'nim' => $user->nim,
-                'departemen' => $user->departemen,
-            ],
-        ];
+private function susunAnggota(User $user, ?array $anggotaTambahan): array
+{
+    $nimKetua = strtoupper((string) $user->nim);
 
-        foreach ($anggotaTambahan ?? [] as $member) {
-            $nim = strtoupper(trim($member['nim']));
+    $anggota = [
+        [
+            'user_id' => $user->id,
+            'nama' => $user->name,
+            'nim' => $user->nim,
+            'departemen' => $user->departemen,
+        ],
+    ];
 
-            if ($nim === $nimKetua) {
-                throw ValidationException::withMessages([
-                    'anggota' => 'NIM ketua kelompok tidak perlu dimasukkan kembali.',
-                ]);
-            }
+    foreach ($anggotaTambahan ?? [] as $member) {
+        $nim = strtoupper(trim($member['nim']));
 
-            $anggota[] = [
-                'user_id' => null,
-                'nama' => $this->formatNama($member['nama']),
-                'nim' => $nim,
-                'departemen' => $member['departemen'],
-            ];
-        }
-
-        $maks = (int) config('magang.maks_anggota', 10);
-
-        if (count($anggota) > $maks) {
+        if ($nim === $nimKetua) {
             throw ValidationException::withMessages([
-                'anggota' => "Maksimal {$maks} mahasiswa per pengajuan (termasuk ketua).",
+                'anggota' => 'NIM ketua kelompok tidak perlu dimasukkan kembali.',
             ]);
         }
 
-        return $anggota;
+        // Ambil departemen otomatis berdasarkan NIM
+        $departemen = Departemen::dariNim($nim);
+
+        if (! $departemen) {
+            throw ValidationException::withMessages([
+                "anggota" => "NIM {$nim} memiliki kode departemen yang tidak dikenal.",
+            ]);
+        }
+
+        $anggota[] = [
+            'user_id' => null,
+            'nama' => $this->formatNama($member['nama']),
+            'nim' => $nim,
+            'departemen' => $departemen['kode'],
+        ];
     }
+
+    $maks = (int) config('magang.maks_anggota', 10);
+
+    if (count($anggota) > $maks) {
+        throw ValidationException::withMessages([
+            'anggota' => "Maksimal {$maks} mahasiswa per pengajuan (termasuk ketua).",
+        ]);
+    }
+
+    return $anggota;
+}
+
 
     private function formatNama(string $value): string
     {
