@@ -24,13 +24,14 @@
 
         .orn {
             position: fixed;
-            left: -2.3cm;   /* = 0.3cm dari tepi kertas */
+            left: -2.3cm;
+            /* = 0.3cm dari tepi kertas */
             width: 1.4cm;
         }
 
         table.kop {
-            width: 17.35cm;
-            margin-right: -0.75cm;      /* kop boleh melebar sedikit ke margin kanan */
+            width: 17.8cm;
+            margin-right: -1.2cm;
             border-collapse: collapse;
             margin-bottom: 40px;
             font-family: Helvetica, Arial, sans-serif;
@@ -81,7 +82,7 @@
         }
 
         td.kop-kontak {
-            width: 5.4cm;
+            width: 5.85cm;
             vertical-align: middle;
             text-align: left;
             font-size: 8.2pt;
@@ -194,9 +195,6 @@
         .ttd-nama {
             white-space: nowrap;
         }
-
-     
-
     </style>
 </head>
 
@@ -204,24 +202,12 @@
 
     {{-- ORNAMEN KIRI: biru (gradasi bertahap) lalu abu, di bagian bawah halaman --}}
     @php
-        // [top dari margin atas (cm), tinggi (cm), warna]
-        $ornamen = [
-            [15.1, 1.2, '#e3edf8'],
-            [16.3, 1.2, '#cfe0f2'],
-            [17.5, 1.2, '#b9d1ec'],
-            [18.7, 1.2, '#a1c2e5'],
-            [19.9, 1.2, '#88b0dc'],
-            [21.1, 1.2, '#6e9ccf'],
-            [22.3, 1.2, '#5a8cc4'],
-            [23.5, 1.3, '#b8bbc0'],
-            [24.8, 1.3, '#a9acb2'],
-            [26.1, 1.3, '#9a9da3'],
-            [27.4, 1.3, '#8c8f95'],
-        ];
+        $ornamen = [[23.5, 1.3, '#b8bbc0'], [24.8, 1.3, '#a9acb2'], [26.1, 1.3, '#9a9da3'], [27.4, 1.3, '#8c8f95']];
     @endphp
 
     @foreach ($ornamen as $o)
-        <div class="orn" style="top: {{ $o[0] }}cm; height: {{ $o[1] }}cm; background: {{ $o[2] }};"></div>
+        <div class="orn"
+            style="top: {{ $o[0] }}cm; height: {{ $o[1] }}cm; background: {{ $o[2] }};"></div>
     @endforeach
 
 
@@ -350,9 +336,7 @@
                 @endforeach
             </tbody>
         </table>
-
     @else
-
         @php
             $satu = $anggota[0] ?? ['nama' => '-', 'nim' => '-', 'departemen' => '-'];
         @endphp
@@ -415,17 +399,9 @@
                 @endforeach
 
                 @if ($ttd)
-
-                    <img
-                        class="ttd-gambar"
-                        src="{{ $ttd }}"
-                        alt="Tanda tangan"
-                    >
-
+                    <img class="ttd-gambar" src="{{ $ttd }}" alt="Tanda tangan">
                 @else
-
                     <div class="ttd-ruang"></div>
-
                 @endif
 
                 <div class="ttd-nama">
