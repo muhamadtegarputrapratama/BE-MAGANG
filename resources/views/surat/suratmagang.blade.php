@@ -37,12 +37,17 @@
 
         /* =========================
            KOP SURAT
+           ukuran disamakan dengan surat asli (font Helvetica,
+           lebar teks: institusi & kementerian 9.3cm, fakultas 7.7cm,
+           kontak 4.9cm; total kop 17.35cm)
         ========================= */
 
         table.kop {
-            width: 100%;
+            width: 17.35cm;
+            margin-right: -0.75cm;      /* kop boleh melebar sedikit ke margin kanan */
             border-collapse: collapse;
-            margin-bottom: 34px;
+            margin-bottom: 40px;
+            font-family: Helvetica, Arial, sans-serif;
         }
 
         table.kop td {
@@ -51,53 +56,55 @@
         }
 
         td.kop-logo {
-            width: 65px;
+            width: 2.15cm;
             text-align: left;
         }
 
         td.kop-logo img {
-            width: 58px;
+            width: 1.85cm;
             height: auto;
         }
 
         td.kop-teks {
-            width: 57%;
+            width: 9.8cm;
             text-align: left;
-            padding-left: 5px;
+            white-space: nowrap;
         }
 
         .k1 {
-            font-size: 8pt;
+            font-size: 8.75pt;
             font-weight: bold;
-            line-height: 1.2;
+            line-height: 1.15;
             margin-bottom: 2px;
             color: #000000;
         }
 
         .k2 {
-            font-size: 17pt;
+            font-size: 18pt;
             font-weight: bold;
-            line-height: 1.1;
+            line-height: 1.05;
             margin-bottom: 3px;
             color: #000000;
         }
 
         .k3 {
-            font-size: 8.5pt;
-            font-weight: bold;
-            line-height: 1.2;
-            color: #000000;
+            font-size: 10.4pt;
+            font-weight: normal;
+            line-height: 1.15;
+            color: #222222;
         }
 
         td.kop-kontak {
-            width: 37%;
+            width: 5.4cm;
             vertical-align: middle;
             text-align: left;
-            font-size: 7.2pt;
-            line-height: 1.4;
+            font-size: 8.2pt;
+            font-weight: bold;
+            line-height: 10.9pt;
             color: #222222;
-            padding-left: 14px !important;
+            padding-left: 0.5cm !important;
             border-left: 1px solid #999999;
+            white-space: nowrap;
         }
 
 
@@ -185,7 +192,7 @@
 
 
         /* =========================
-           FOOTER
+           FOOTER (garis biru + slogan)
         ========================= */
 
         .footer {
@@ -193,9 +200,12 @@
             left: 0;
             right: 0;
             bottom: -1.35cm;
+            padding-top: 5pt;
+            border-top: 2pt solid #1f56a5;   /* garis biru */
             text-align: center;
-            font-size: 9pt;
-            color: #555555;
+            font-family: Helvetica, Arial, sans-serif;
+            font-size: 9.7pt;
+            color: #333333;
         }
 
     </style>
