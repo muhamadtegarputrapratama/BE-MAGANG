@@ -13,16 +13,21 @@ class BerkasPengajuanController extends Controller
 {
     /** jenis di URL => kolom di tabel */
     private const BERKAS = [
-        'surat-pengajuan'   => 'file_surat_pengajuan',
-        'bukti-spp'         => 'file_bukti_spp',
-        'surat-rekomendasi' => 'file_surat_rekomendasi',
-        'surat-magang'      => 'file_surat_magang',
+        'surat-pengajuan'        => 'file_surat_pengajuan',
+        'surat-pengajuan-kedua'  => 'file_surat_pengajuan_kedua',
+        'bukti-spp'              => 'file_bukti_spp',
+        'surat-rekomendasi'      => 'file_surat_rekomendasi',
+        'surat-magang'           => 'file_surat_magang',
+        'surat-magang-kedua'     => 'file_surat_magang_kedua',
     ];
 
     private const ALIAS = [
         'spp'         => 'bukti-spp',
         'rekomendasi' => 'surat-rekomendasi',
     ];
+
+    /** Berkas yang boleh dibuka walau pengajuan masih draft (surat yang sudah ditandatangani). */
+    private const BOLEH_SAAT_DRAFT = ['surat-pengajuan', 'surat-pengajuan-kedua'];
 
     public function tampil(Request $request, PengajuanMagang $pengajuan, string $jenis)
     {
@@ -37,7 +42,11 @@ class BerkasPengajuanController extends Controller
         $jenis = self::ALIAS[$jenis] ?? $jenis;
 
         abort_unless(isset(self::BERKAS[$jenis]), 404, "Jenis berkas tidak dikenal: {$jenis}");
-        abort_if($pengajuan->status === StatusPengajuan::Draft && $jenis !== 'surat-pengajuan', 404, 'Pengajuan belum dikirim.');
+        abort_if(
+            $pengajuan->status === StatusPengajuan::Draft && ! in_array($jenis, self::BOLEH_SAAT_DRAFT, true),
+            404,
+            'Pengajuan belum dikirim.'
+        );
 
         $path = $pengajuan->{self::BERKAS[$jenis]};
 

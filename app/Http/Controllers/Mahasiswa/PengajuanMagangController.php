@@ -65,36 +65,47 @@ class PengajuanMagangController extends Controller
         return $this->respons($pengajuan, 'Data pengajuan diperbarui. Silakan tanda tangan ulang.');
     }
 
+    /** Preview surat pengajuan. Instansi kedua: tambahkan ?urutan=2 (default 1). */
     public function preview(Request $request, PengajuanMagang $pengajuan)
     {
         $this->pastikanPemilik($request, $pengajuan);
 
-        return response($this->service->previewSurat($pengajuan), 200, [
+        $urutan = $this->urutan($request, $pengajuan);
+
+        return response($this->service->previewSurat($pengajuan, $urutan), 200, [
             'Content-Type'        => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="surat-pengajuan.pdf"',
+            'Content-Disposition' => 'inline; filename="surat-pengajuan-' . $urutan . '.pdf"',
         ]);
     }
 
-    /** Menampilkan atau mengunduh Surat Pengantar Magang yang sudah disetujui admin. */
+    /**
+     * Menampilkan atau mengunduh Surat Pengantar Magang yang sudah disetujui admin.
+     * Instansi kedua: tambahkan ?urutan=2 (default 1).
+     */
     public function suratMagang(Request $request, PengajuanMagang $pengajuan)
     {
         $this->pastikanPemilik($request, $pengajuan);
 
+        $urutan = $this->urutan($request, $pengajuan);
+        $file   = $pengajuan->fileSuratMagang($urutan);
+
         abort_unless(
-            $pengajuan->status === StatusPengajuan::Setuju && $pengajuan->file_surat_magang,
+            $pengajuan->status === StatusPengajuan::Setuju && $file,
             404,
             'Surat pengantar magang belum tersedia atau pengajuan belum disetujui.'
         );
 
         $disk = Storage::disk('local');
-        abort_unless($disk->exists($pengajuan->file_surat_magang), 404, 'File surat pengantar magang tidak ditemukan.');
+        abort_unless($disk->exists($file), 404, 'File surat pengantar magang tidak ditemukan.');
 
         $mode = $request->query('mode', 'preview');
-        $namaFile = "surat-pengantar-magang-{$pengajuan->id}.pdf";
+        $namaFile = "surat-pengantar-magang-{$pengajuan->id}"
+            . ($urutan > 1 ? "-{$urutan}" : '')
+            . '.pdf';
 
         return $mode === 'download'
-            ? $disk->download($pengajuan->file_surat_magang, $namaFile)
-            : $disk->response($pengajuan->file_surat_magang, $namaFile);
+            ? $disk->download($file, $namaFile)
+            : $disk->response($file, $namaFile);
     }
 
     public function tandaTangan(Request $request, PengajuanMagang $pengajuan)
@@ -134,6 +145,20 @@ class PengajuanMagangController extends Controller
             (int) $pengajuan->user_id === (int) $request->user()->id,
             403
         );
+    }
+
+    /** Urutan surat dari ?urutan= (1 atau 2). 404 bila instansi tersebut tidak ada. */
+    private function urutan(Request $request, PengajuanMagang $pengajuan): int
+    {
+        $urutan = (int) $request->query('urutan', 1);
+
+        abort_unless(
+            $urutan >= 1 && $urutan <= $pengajuan->jumlahInstansi(),
+            404,
+            'Surat untuk instansi tersebut tidak ada.'
+        );
+
+        return $urutan;
     }
 
     private function respons(PengajuanMagang $pengajuan, string $pesan, int $status = 200)

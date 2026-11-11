@@ -18,29 +18,41 @@ class VerifikasiPengajuanService
     ) {
     }
 
-    /** Admin menyetujui: nomor surat dibuat, surat pengantar magang dibuat dan disimpan. */
+    /**
+     * Admin menyetujui: satu nomor surat dan satu surat pengantar magang untuk TIAP instansi.
+     * Satu instansi menghasilkan 1 surat, dua instansi menghasilkan 2 surat bernomor berbeda.
+     */
     public function setujui(PengajuanMagang $pengajuan, User $admin): PengajuanMagang
     {
-        $pathSurat = null;
+        $pathSurat = [];
 
         try {
             return DB::transaction(function () use ($pengajuan, $admin, &$pathSurat) {
                 $p = $this->kunciDanPastikanMenunggu($pengajuan);
 
+                // Nomor surat: instansi 1 lebih dulu, lalu instansi 2 (nomor berurutan).
                 $p->nomor_surat = $this->nomorSurat->berikutnya();
+                $p->nomor_surat_kedua = $p->jumlahInstansi() === 2
+                    ? $this->nomorSurat->berikutnya()
+                    : null;
+
                 $p->status = StatusPengajuan::Setuju;
                 $p->diverifikasi_oleh = $admin->id;
                 $p->diverifikasi_at = now();
 
-                $pathSurat = $this->suratMagang->simpan($p);
-                $p->file_surat_magang = $pathSurat;
+                foreach ($p->daftarInstansi() as $instansi) {
+                    $pathSurat[$instansi['urutan']] = $this->suratMagang->simpan($p, $instansi['urutan']);
+                }
+
+                $p->file_surat_magang = $pathSurat[1];
+                $p->file_surat_magang_kedua = $pathSurat[2] ?? null;
                 $p->save();
 
                 return $p;
             });
         } catch (Throwable $e) {
-            if ($pathSurat) {
-                Storage::disk('local')->delete($pathSurat);
+            foreach ($pathSurat as $path) {
+                Storage::disk('local')->delete($path);
             }
 
             throw $e;

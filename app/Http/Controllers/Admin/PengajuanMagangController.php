@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\VerifikasiPengajuanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use App\Support\Departemen;
 
@@ -87,39 +88,57 @@ class PengajuanMagangController extends Controller
     }
 
     /**
- * Admin mengedit data pengajuan magang.
- */
-public function update(
-    UpdatePengajuanMagangRequest $request,
-    PengajuanMagang $pengajuan
-) {
-    // Draft tidak bisa diedit melalui halaman admin.
-    abort_if(
-        $pengajuan->status === StatusPengajuan::Draft,
-        404
-    );
+     * Admin mengedit data pengajuan magang.
+     */
+    public function update(
+        UpdatePengajuanMagangRequest $request,
+        PengajuanMagang $pengajuan
+    ) {
+        // Draft tidak bisa diedit melalui halaman admin.
+        abort_if(
+            $pengajuan->status === StatusPengajuan::Draft,
+            404
+        );
 
-    // Pengajuan yang sudah disetujui tidak boleh diedit
-    // karena surat dan tanda tangan mungkin sudah diterbitkan.
-    abort_if(
-        !in_array(
-            $pengajuan->status->value,
-            ['menunggu_verifikasi', 'revisi'],
-            true
-        ),
-        403,
-        'Pengajuan yang sudah disetujui tidak dapat diedit.'
-    );
+        // Pengajuan yang sudah disetujui tidak boleh diedit
+        // karena surat dan tanda tangan mungkin sudah diterbitkan.
+        abort_if(
+            !in_array(
+                $pengajuan->status->value,
+                ['menunggu_verifikasi', 'revisi'],
+                true
+            ),
+            403,
+            'Pengajuan yang sudah disetujui tidak dapat diedit.'
+        );
 
-    $pengajuan->fill($request->validated());
-    $pengajuan->save();
+        $pengajuan->fill($request->validated());
 
-    return (new PengajuanMagangAdminDetailResource(
-        $pengajuan->load('user')
-    ))->additional([
-        'message' => 'Data pengajuan magang berhasil diperbarui.',
-    ]);
-}
+        // Instansi kedua dikosongkan: bersihkan data turunannya dan surat kedua yang sudah ditandatangani.
+        $fileKedua = null;
+
+        if (blank($pengajuan->instansi_kedua)) {
+            $pengajuan->instansi_kedua = null;
+            $pengajuan->alamat_instansi_kedua = null;
+            $pengajuan->tanggal_mulai_kedua = null;
+            $pengajuan->tanggal_selesai_kedua = null;
+
+            $fileKedua = $pengajuan->file_surat_pengajuan_kedua;
+            $pengajuan->file_surat_pengajuan_kedua = null;
+        }
+
+        $pengajuan->save();
+
+        if ($fileKedua) {
+            Storage::disk('local')->delete($fileKedua);
+        }
+
+        return (new PengajuanMagangAdminDetailResource(
+            $pengajuan->load('user')
+        ))->additional([
+            'message' => 'Data pengajuan magang berhasil diperbarui.',
+        ]);
+    }
 
     /** Admin memutuskan: setuju atau revisi (catatan wajib saat revisi). */
     public function ubahStatus(UbahStatusPengajuanRequest $request, PengajuanMagang $pengajuan)
@@ -128,7 +147,9 @@ public function update(
 
         if ($request->validated('status') === 'setuju') {
             $pengajuan = $this->verifikasi->setujui($pengajuan, $request->user());
-            $pesan = 'Pengajuan disetujui dan surat pengantar magang telah dibuat.';
+            $pesan = $pengajuan->jumlahInstansi() === 2
+                ? 'Pengajuan disetujui dan 2 surat pengantar magang telah dibuat.'
+                : 'Pengajuan disetujui dan surat pengantar magang telah dibuat.';
         } else {
             $pengajuan = $this->verifikasi->mintaRevisi(
                 $pengajuan,
@@ -186,7 +207,9 @@ public function update(
             ->when($filter['q'] ?? null, function ($query, $kata) {
                 $query->where(function ($query) use ($kata) {
                     $query->where('instansi', 'like', "%{$kata}%")
+                        ->orWhere('instansi_kedua', 'like', "%{$kata}%")
                         ->orWhere('nomor_surat', 'like', "%{$kata}%")
+                        ->orWhere('nomor_surat_kedua', 'like', "%{$kata}%")
                         // SESUAIKAN nama kolom users (name, nim)
                         ->orWhereHas('user', fn($user) => $user
                             ->where('name', 'like', "%{$kata}%")

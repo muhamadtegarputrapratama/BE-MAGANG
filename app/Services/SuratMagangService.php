@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\PengajuanMagang;
-use App\Support\Departemen;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Illuminate\Support\Carbon;
@@ -11,40 +10,42 @@ use Illuminate\Support\Facades\Storage;
 
 class SuratMagangService
 {
-    /** Daftar yang dicetak di surat. Sementara hanya pengaju; anggota menyusul dari database. */
-    private function daftarAnggota(PengajuanMagang $pengajuan): array
+    /**
+     * Membuat PDF surat pengantar magang untuk instansi ke-$urutan (1 atau 2) dan menyimpannya.
+     * Surat pertama memakai nama file lama (surat-magang.pdf) agar data lama tetap cocok.
+     */
+    public function simpan(PengajuanMagang $pengajuan, int $urutan = 1): string
     {
-        $user = $pengajuan->user;
-
-        return [[
-            'nama'       => $user->name,
-            'nim'        => $user->nim,
-            'departemen' => Departemen::nama($user->departemen),
-        ]];
-    }
-
-    /** Membuat PDF surat pengantar magang dan menyimpannya. Mengembalikan path-nya. */
-    public function simpan(PengajuanMagang $pengajuan): string
-    {
-        $path = "pengajuan/{$pengajuan->id}/surat-magang.pdf";
+        $path = $urutan > 1
+            ? "pengajuan/{$pengajuan->id}/surat-magang-{$urutan}.pdf"
+            : "pengajuan/{$pengajuan->id}/surat-magang.pdf";
 
         $berhasil = Storage::disk('local')->put(
             $path,
-            $this->render($pengajuan)
+            $this->render($pengajuan, $urutan)
         );
 
         if (! $berhasil) {
-            throw new \RuntimeException('Gagal menyimpan PDF surat pengantar magang.');
+            throw new \RuntimeException(
+                'Gagal menyimpan PDF surat pengantar magang.'
+            );
         }
 
         return $path;
     }
 
-    public function render(PengajuanMagang $pengajuan): string
+    /**
+     * Membuat PDF surat pengantar magang untuk instansi ke-$urutan.
+     * Isi surat 1 memuat instansi 1, isi surat 2 memuat instansi 2.
+     */
+    public function render(PengajuanMagang $pengajuan, int $urutan = 1): string
     {
         $pengajuan->loadMissing('user');
-        $user = $pengajuan->user;
+
         $penandatangan = config('magang.penandatangan');
+
+        $instansi = $pengajuan->daftarInstansi()[$urutan - 1]
+            ?? throw new \InvalidArgumentException("Instansi ke-{$urutan} tidak ditemukan.");
 
         $html = view('surat.suratmagang', [
             'logo' => $this->gambar(config('magang.logo_path')),
@@ -53,18 +54,19 @@ class SuratMagangService
 
             'fakultas'     => config('magang.fakultas'),
             'kota'         => config('magang.kota'),
-            'nomor'        => $pengajuan->nomor_surat,
-            'tanggalSurat' => $this->tanggal($pengajuan->diverifikasi_at ?? now()),
-            'anggota' => $this->daftarAnggota($pengajuan),
+            'nomor'        => $instansi['nomor'],
+            'tanggalSurat' => $this->tanggal(
+                $pengajuan->diverifikasi_at ?? now()
+            ),
 
-            // 'nama'       => $user->name,
-            // 'nim'        => $user->nim,
-            // 'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
+            // Pengaju nomor 1 + anggota tambahan (maks. 10 orang).
+            'anggota' => $pengajuan->daftarAnggotaCetak(),
 
-            'instansi'       => $pengajuan->instansi,
-            'alamat'         => $pengajuan->alamat_instansi,
-            'tanggalMulai'   => $this->tanggal($pengajuan->tanggal_mulai),
-            'tanggalSelesai' => $this->tanggal($pengajuan->tanggal_selesai),
+            // Data instansi untuk surat ini.
+            'instansi'       => $instansi['nama'],
+            'alamat'         => $instansi['alamat'],
+            'tanggalMulai'   => $this->tanggal($instansi['mulai']),
+            'tanggalSelesai' => $this->tanggal($instansi['selesai']),
 
             'jabatan'           => $penandatangan['jabatan'],
             'namaPenandatangan' => $penandatangan['nama'],
@@ -82,13 +84,20 @@ class SuratMagangService
         return $dompdf->output();
     }
 
-    /** Tanggal berbahasa Indonesia, contoh: "29 Oktober 2026". */
+    /**
+     * Format tanggal berbahasa Indonesia.
+     * Contoh: 29 Oktober 2026.
+     */
     private function tanggal($nilai): string
     {
-        return Carbon::parse($nilai)->locale('id')->translatedFormat('j F Y');
+        return Carbon::parse($nilai)
+            ->locale('id')
+            ->translatedFormat('j F Y');
     }
 
-    /** Mengubah gambar di folder public menjadi data URI. Null jika belum ada. */
+    /**
+     * Mengubah gambar di folder public menjadi data URI.
+     */
     private function gambar(?string $relatif): ?string
     {
         if (! $relatif) {

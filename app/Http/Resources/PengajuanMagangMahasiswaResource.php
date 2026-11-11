@@ -14,9 +14,12 @@ class PengajuanMagangMahasiswaResource extends PengajuanMagangResource
 {
     public function toArray(Request $request): array
     {
+        $setuju = $this->status === StatusPengajuan::Setuju;
+
         return array_merge(parent::toArray($request), [
             // Nomor surat hanya diberikan setelah pengajuan disetujui
-            'nomor_surat' => $this->status === StatusPengajuan::Setuju ? $this->nomor_surat : null,
+            'nomor_surat'       => $setuju ? $this->nomor_surat : null,
+            'nomor_surat_kedua' => $setuju ? $this->nomor_surat_kedua : null,
 
             // Menggantikan 'berkas' bawaan (yang hanya true/false) dengan daftar berkas + link
             'berkas'      => $this->daftarBerkas(),
@@ -25,11 +28,16 @@ class PengajuanMagangMahasiswaResource extends PengajuanMagangResource
 
     private function daftarBerkas(): array
     {
+        // Bila ada dua instansi, label surat diberi keterangan instansi 1 / 2.
+        $dua = $this->jumlahInstansi() === 2;
+
         $berkas = [
-            'surat-pengajuan'   => ['label' => 'Surat Pengajuan',        'path' => $this->file_surat_pengajuan],
-            'bukti-spp'         => ['label' => 'Bukti Pembayaran SPP',   'path' => $this->file_bukti_spp],
-            'surat-rekomendasi' => ['label' => 'Surat Rekomendasi',      'path' => $this->file_surat_rekomendasi],
-            'surat-magang'      => ['label' => 'Surat Pengantar Magang', 'path' => $this->file_surat_magang],
+            'surat-pengajuan'       => ['label' => 'Surat Pengajuan' . ($dua ? ' (Instansi 1)' : ''), 'path' => $this->file_surat_pengajuan],
+            'surat-pengajuan-kedua' => ['label' => 'Surat Pengajuan (Instansi 2)',                     'path' => $this->file_surat_pengajuan_kedua],
+            'bukti-spp'             => ['label' => 'Bukti Pembayaran SPP',                             'path' => $this->file_bukti_spp],
+            'surat-rekomendasi'     => ['label' => 'Surat Rekomendasi',                                'path' => $this->file_surat_rekomendasi],
+            'surat-magang'          => ['label' => 'Surat Pengantar Magang' . ($dua ? ' (Instansi 1)' : ''), 'path' => $this->file_surat_magang],
+            'surat-magang-kedua'    => ['label' => 'Surat Pengantar Magang (Instansi 2)',              'path' => $this->file_surat_magang_kedua],
         ];
 
         $hasil = [];
