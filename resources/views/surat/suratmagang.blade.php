@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="id">
 
@@ -9,7 +8,7 @@
     <style>
         @page {
             size: A4;
-            margin: 1.2cm 1.8cm 2cm 1.8cm;
+            margin: 1.2cm 1.8cm 2cm 2.6cm;
         }
 
         * {
@@ -24,27 +23,17 @@
         }
 
         /* =========================
-           ORNAMEN SISI KIRI
+           ORNAMEN SISI KIRI (bagian bawah halaman)
+           fixed di dompdf mengacu ke area margin:
+           left = posisi dari tepi kertas - margin kiri (2.6cm)
+           top  = posisi dari tepi kertas - margin atas (1.2cm)
         ========================= */
 
-        .ornamen {
+        .orn {
             position: fixed;
-            left: 0.15cm;
-            top: 4.2cm;
-            width: 0.45cm;
-            height: 14.5cm;
-            background: #d1d5db;
+            left: -2.3cm;   /* = 0.3cm dari tepi kertas */
+            width: 1.4cm;
         }
-
-        .ornamen-biru {
-            position: absolute;
-            bottom: 2.2cm;
-            left: 0;
-            width: 100%;
-            height: 5cm;
-            background: #7da7d9;
-        }
-
 
         /* =========================
            KOP SURAT
@@ -214,10 +203,27 @@
 
 <body>
 
-    {{-- ORNAMEN KIRI --}}
-    <div class="ornamen">
-        <div class="ornamen-biru"></div>
-    </div>
+    {{-- ORNAMEN KIRI: biru (gradasi bertahap) lalu abu, di bagian bawah halaman --}}
+    @php
+        // [top dari margin atas (cm), tinggi (cm), warna]
+        $ornamen = [
+            [15.1, 1.2, '#e3edf8'],
+            [16.3, 1.2, '#cfe0f2'],
+            [17.5, 1.2, '#b9d1ec'],
+            [18.7, 1.2, '#a1c2e5'],
+            [19.9, 1.2, '#88b0dc'],
+            [21.1, 1.2, '#6e9ccf'],
+            [22.3, 1.2, '#5a8cc4'],
+            [23.5, 1.3, '#b8bbc0'],
+            [24.8, 1.3, '#a9acb2'],
+            [26.1, 1.3, '#9a9da3'],
+            [27.4, 1.3, '#8c8f95'],
+        ];
+    @endphp
+
+    @foreach ($ornamen as $o)
+        <div class="orn" style="top: {{ $o[0] }}cm; height: {{ $o[1] }}cm; background: {{ $o[2] }};"></div>
+    @endforeach
 
 
     {{-- FOOTER --}}
