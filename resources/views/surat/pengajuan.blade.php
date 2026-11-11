@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <title>Form Pengajuan Magang Mandiri</title>
+
     <style>
         @page {
             margin: 2.5cm 2.5cm 2cm 2.5cm;
@@ -12,15 +13,15 @@
             font-family: "Times New Roman", Times, serif;
             font-size: 12pt;
             line-height: 1.5;
-            color: #000;
+            color: #000000;
         }
 
         h1 {
             text-align: center;
-            font-size: 14pt;
+            font-size: 12pt;
             font-weight: bold;
             text-decoration: underline;
-            margin: 0 0 28px 0;
+            margin: 0 0 22px 0;
         }
 
         p {
@@ -28,70 +29,113 @@
             text-align: justify;
         }
 
+        /* =========================
+           BARIS DATA (label : isi)
+        ========================= */
+
         table.data {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
         }
 
-        table.data td {
+        table.data > tbody > tr > td {
             vertical-align: top;
-            padding: 2px 0;
+            padding: 1px 0;
         }
 
         td.label {
-            width: 185px;
+            width: 4.6cm;
         }
 
         td.titik {
-            width: 14px;
+            width: 0.5cm;
         }
 
-        .instansi {
-            font-weight: bold;
-            border-bottom: 1px dotted #000;
-            padding-bottom: 2px;
-            margin-bottom: 14px;
+        /* =========================
+           DAFTAR BERNOMOR (nama + NIM, departemen)
+        ========================= */
+
+        table.daftar {
+            width: 100%;
+            border-collapse: collapse;
+            line-height: 1.3;
         }
 
-        .penutup {
-            margin-top: 18px;
+        table.daftar td {
+            vertical-align: top;
+            padding: 0;
         }
+
+        table.daftar td.no {
+            width: 0.8cm;
+        }
+
+        table.daftar td.nim {
+            width: 3.2cm;
+        }
+
+        /* =========================
+           TANDA TANGAN
+        ========================= */
 
         .ttd {
-            margin-top: 22px;
-            width: 280px;
+            margin-top: 16px;
+            width: 300px;
             page-break-inside: avoid;
         }
 
         .qr {
-            margin: 8px 0 6px 0;
-            height: 110px;
+            margin: 6px 0 4px 0;
+            height: 80px;
+        }
+
+        .qr img {
+            height: 80px;
         }
 
         .belum-ttd {
-            width: 110px;
-            height: 110px;
-            border: 1px dashed #999;
-            color: #888;
-            font-size: 9pt;
+            width: 80px;
+            height: 80px;
+            border: 1px dashed #999999;
+            color: #888888;
+            font-size: 8pt;
+            line-height: 1.2;
             text-align: center;
-            padding-top: 44px;
+            padding-top: 30px;
             box-sizing: border-box;
         }
 
-        .lampiran {
-            margin-top: 26px;
-            page-break-inside: avoid;
+        .garis {
+            text-decoration: underline;
         }
 
-        .lampiran table td {
-            vertical-align: top;
-            padding: 0;
+        /* =========================
+           LAMPIRAN
+        ========================= */
+
+        .lampiran {
+            margin-top: 50px;
+            line-height: 1.35;
+            page-break-inside: avoid;
         }
     </style>
 </head>
+
 <body>
+
+    @php
+        $daftar  = array_values($anggota);
+        $banyak  = count($daftar) > 1;
+        $pengaju = $daftar[0] ?? ['nama' => '-', 'nim' => '-', 'departemen' => '-'];
+
+        // Departemen unik, urut sesuai kemunculan (satu departemen bisa dipakai banyak mahasiswa)
+        $deptList = collect($daftar)->pluck('departemen')->filter()->unique()->values();
+
+        // Lampiran bisa diubah dari controller/service; default sesuai contoh surat
+        $daftarLampiran = $lampiran ?? ['Surat Rekomendasi Dosen Pembimbing Magang'];
+    @endphp
+
 
     <h1>FORM PENGAJUAN MAGANG MANDIRI</h1>
 
@@ -104,68 +148,103 @@
         <tr>
             <td class="label">Nama</td>
             <td class="titik">:</td>
-            <td>{{ $nama }}</td>
+            <td>
+                <table class="daftar">
+                    @foreach ($daftar as $i => $a)
+                        <tr>
+                            @if ($banyak)
+                                <td class="no">{{ $i + 1 }}.</td>
+                            @endif
+                            <td>{{ $a['nama'] }}</td>
+                            @if ($banyak)
+                                <td class="nim">{{ $a['nim'] }}</td>
+                            @endif
+                        </tr>
+                    @endforeach
+                </table>
+            </td>
         </tr>
+
+        @unless ($banyak)
+            <tr>
+                <td class="label">NIM</td>
+                <td class="titik">:</td>
+                <td>{{ $pengaju['nim'] }}</td>
+            </tr>
+        @endunless
+
         <tr>
-            <td class="label">NIM</td>
-            <td class="titik">:</td>
-            <td>{{ $nim }}</td>
-        </tr>
-        <tr>
-            <td class="label">Program Studi/Departemen</td>
-            <td class="titik">:</td>
-            <td>{{ $departemen }}</td>
+            <td class="label" style="padding-top: 8px;">Program studi/Departemen</td>
+            <td class="titik" style="padding-top: 8px;">:</td>
+            <td style="padding-top: 8px;">
+                <table class="daftar">
+                    @foreach ($deptList as $i => $dept)
+                        <tr>
+                            @if ($deptList->count() > 1)
+                                <td class="no">{{ $i + 1 }}.</td>
+                            @endif
+                            <td>{{ $dept }}</td>
+                        </tr>
+                    @endforeach
+                </table>
+            </td>
         </tr>
     </table>
 
     <p>Bermaksud untuk mengajukan surat keterangan Magang Mandiri ke Instansi:</p>
 
-    <div class="instansi">{{ $instansi }}</div>
-
     <table class="data">
+        <tr>
+            <td class="label">Nama Instansi</td>
+            <td class="titik">:</td>
+            <td>{{ $instansi }}</td>
+        </tr>
         <tr>
             <td class="label">Alamat</td>
             <td class="titik">:</td>
-            <td>{{ $alamat }}</td>
+            <td style="text-align: justify;">{!! nl2br(e($alamat)) !!}</td>
         </tr>
         <tr>
-            <td class="label">Waktu pelaksanaan</td>
+            <td class="label">Waktu Pelaksanaan</td>
             <td class="titik">:</td>
-            <td>{{ $tanggalMulai }} - {{ $tanggalSelesai }}</td>
+            <td>{{ $tanggalMulai }} s/d {{ $tanggalSelesai }}</td>
         </tr>
     </table>
 
-    <p class="penutup">
-        Sehubungan dengan itu kami mohon dapat diberikan surat pengantar magang mandiri.<br>
-        Atas segala bantuannya diucapkan terima kasih.
+
+    <p>
+        Sehubungan dengan itu kami mohon dapat diberikan surat pengantar magang mandiri.
+        Atas segala bantuannya kami mengucapkan terima kasih.
     </p>
+
 
     <div class="ttd">
         {{ $kota }}, {{ $tanggalSurat }}<br>
         Yang mengajukan,
 
         <div class="qr">
-            @if($qr)
-                <img src="{{ $qr }}" width="110" height="110" alt="QR verifikasi">
+            @if ($qr)
+                <img src="{{ $qr }}" alt="QR verifikasi">
             @else
                 <div class="belum-ttd">Belum ditandatangani</div>
             @endif
         </div>
 
-        <strong>{{ $nama }}</strong><br>
-        NIM {{ $nim }}
+        <span class="garis">{{ $pengaju['nama'] }}</span><br>
+        NIM {{ $pengaju['nim'] }}
     </div>
 
+
     <div class="lampiran">
-        <table>
-            <tr>
-                <td style="width: 300px;">Dokumen persyaratan yang dilampirkan :</td>
-                <td>
-                    1. Rekomendasi dari pembimbing akademik<br>
-                    2. Bukti SPP
-                </td>
-            </tr>
-        </table>
+        Dokumen persyaratan yang dilampirkan:<br>
+
+        @if (count($daftarLampiran) > 1)
+            @foreach ($daftarLampiran as $i => $item)
+                {{ $i + 1 }}. {{ $item }}<br>
+            @endforeach
+        @else
+            {{ $daftarLampiran[0] ?? '' }}
+        @endif
     </div>
 
 </body>

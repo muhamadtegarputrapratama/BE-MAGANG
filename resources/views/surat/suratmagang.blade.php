@@ -22,25 +22,11 @@
             color: #111111;
         }
 
-        /* =========================
-           ORNAMEN SISI KIRI (bagian bawah halaman)
-           fixed di dompdf mengacu ke area margin:
-           left = posisi dari tepi kertas - margin kiri (2.6cm)
-           top  = posisi dari tepi kertas - margin atas (1.2cm)
-        ========================= */
-
         .orn {
             position: fixed;
             left: -2.3cm;   /* = 0.3cm dari tepi kertas */
             width: 1.4cm;
         }
-
-        /* =========================
-           KOP SURAT
-           ukuran disamakan dengan surat asli (font Helvetica,
-           lebar teks: institusi & kementerian 9.3cm, fakultas 7.7cm,
-           kontak 4.9cm; total kop 17.35cm)
-        ========================= */
 
         table.kop {
             width: 17.35cm;
@@ -107,11 +93,6 @@
             white-space: nowrap;
         }
 
-
-        /* =========================
-           NOMOR DAN TANGGAL SURAT
-        ========================= */
-
         table.meta {
             width: 100%;
             border-collapse: collapse;
@@ -137,11 +118,6 @@
             white-space: nowrap;
         }
 
-
-        /* =========================
-           ISI SURAT
-        ========================= */
-
         p {
             margin: 0 0 10px 0;
             text-align: justify;
@@ -151,6 +127,7 @@
             margin-bottom: 20px;
         }
 
+        /* Tampilan 1 orang */
         table.mhs {
             margin: 4px 0 14px 20px;
             border-collapse: collapse;
@@ -161,10 +138,38 @@
             padding: 1px 0;
         }
 
+        /* Tampilan kelompok (lebih dari 1 orang) */
+        table.anggota {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 6px 0 16px 0;
+            font-size: 10pt;
+        }
 
-        /* =========================
-           TANDA TANGAN
-        ========================= */
+        table.anggota thead {
+            display: table-header-group;
+        }
+
+        table.anggota tr {
+            page-break-inside: avoid;
+        }
+
+        table.anggota th,
+        table.anggota td {
+            border: 1px solid #000000;
+            padding: 2px 6px;
+            vertical-align: top;
+            line-height: 1.35;
+        }
+
+        table.anggota th {
+            text-align: center;
+            font-weight: bold;
+        }
+
+        table.anggota td.no {
+            text-align: center;
+        }
 
         table.ttd {
             width: 100%;
@@ -189,11 +194,6 @@
         .ttd-nama {
             white-space: nowrap;
         }
-
-
-        /* =========================
-           FOOTER (garis biru + slogan)
-        ========================= */
 
         .footer {
             position: fixed;
@@ -316,8 +316,8 @@
     ========================== --}}
 
     <p class="tujuan">
-        Yth. Direktur {{ $instansi }}<br>
-        {{ $alamat }}
+        Yth. Pimpinan {{ $instansi }}<br>
+        {!! nl2br(e($alamat)) !!}
     </p>
 
 
@@ -335,29 +335,62 @@
 
     {{-- =========================
          DATA MAHASISWA
+         - lebih dari 1 orang : tabel kelompok
+         - 1 orang            : format Nama / NIM / Departemen
     ========================== --}}
 
-    <table class="mhs">
+    @if (count($anggota) > 1)
 
-        <tr>
-            <td style="width: 90px;">Nama</td>
-            <td style="width: 14px;">:</td>
-            <td>{{ $nama }}</td>
-        </tr>
+        <table class="anggota">
+            <thead>
+                <tr>
+                    <th style="width: 6%;">No.</th>
+                    <th style="width: 38%;">Nama</th>
+                    <th style="width: 22%;">NIM</th>
+                    <th style="width: 34%;">Departemen</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach ($anggota as $i => $a)
+                    <tr>
+                        <td class="no">{{ $i + 1 }}.</td>
+                        <td>{{ $a['nama'] }}</td>
+                        <td>{{ $a['nim'] }}</td>
+                        <td>{{ $a['departemen'] }}</td>
+                    </tr>
+                @endforeach
+            </tbody>
+        </table>
 
-        <tr>
-            <td>NIM</td>
-            <td>:</td>
-            <td>{{ $nim }}</td>
-        </tr>
+    @else
 
-        <tr>
-            <td>Departemen</td>
-            <td>:</td>
-            <td>{{ $departemen }}</td>
-        </tr>
+        @php
+            $satu = $anggota[0] ?? ['nama' => '-', 'nim' => '-', 'departemen' => '-'];
+        @endphp
 
-    </table>
+        <table class="mhs">
+
+            <tr>
+                <td style="width: 90px;">Nama</td>
+                <td style="width: 14px;">:</td>
+                <td>{{ $satu['nama'] }}</td>
+            </tr>
+
+            <tr>
+                <td>NIM</td>
+                <td>:</td>
+                <td>{{ $satu['nim'] }}</td>
+            </tr>
+
+            <tr>
+                <td>Departemen</td>
+                <td>:</td>
+                <td>{{ $satu['departemen'] }}</td>
+            </tr>
+
+        </table>
+
+    @endif
 
 
     {{-- =========================

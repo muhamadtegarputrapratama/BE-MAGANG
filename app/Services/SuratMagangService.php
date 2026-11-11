@@ -11,22 +11,34 @@ use Illuminate\Support\Facades\Storage;
 
 class SuratMagangService
 {
-    /** Membuat PDF surat pengantar magang dan menyimpannya. Mengembalikan path-nya. */
-  public function simpan(PengajuanMagang $pengajuan): string
-{
-    $path = "pengajuan/{$pengajuan->id}/surat-magang.pdf";
+    /** Daftar yang dicetak di surat. Sementara hanya pengaju; anggota menyusul dari database. */
+    private function daftarAnggota(PengajuanMagang $pengajuan): array
+    {
+        $user = $pengajuan->user;
 
-    $berhasil = Storage::disk('local')->put(
-        $path,
-        $this->render($pengajuan)
-    );
-
-    if (! $berhasil) {
-        throw new \RuntimeException('Gagal menyimpan PDF surat pengantar magang.');
+        return [[
+            'nama'       => $user->name,
+            'nim'        => $user->nim,
+            'departemen' => Departemen::nama($user->departemen),
+        ]];
     }
 
-    return $path;
-}
+    /** Membuat PDF surat pengantar magang dan menyimpannya. Mengembalikan path-nya. */
+    public function simpan(PengajuanMagang $pengajuan): string
+    {
+        $path = "pengajuan/{$pengajuan->id}/surat-magang.pdf";
+
+        $berhasil = Storage::disk('local')->put(
+            $path,
+            $this->render($pengajuan)
+        );
+
+        if (! $berhasil) {
+            throw new \RuntimeException('Gagal menyimpan PDF surat pengantar magang.');
+        }
+
+        return $path;
+    }
 
     public function render(PengajuanMagang $pengajuan): string
     {
@@ -43,11 +55,11 @@ class SuratMagangService
             'kota'         => config('magang.kota'),
             'nomor'        => $pengajuan->nomor_surat,
             'tanggalSurat' => $this->tanggal($pengajuan->diverifikasi_at ?? now()),
+            'anggota' => $this->daftarAnggota($pengajuan),
 
-            'nama'       => $user->name,
-            'nim'        => $user->nim,
-            // Nama lengkap departemen (Silvikultur, bukan SVK); kode ditampilkan jika tidak dikenal.
-            'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
+            // 'nama'       => $user->name,
+            // 'nim'        => $user->nim,
+            // 'departemen' => Departemen::namaDariKode($user->departemen) ?? $user->departemen,
 
             'instansi'       => $pengajuan->instansi,
             'alamat'         => $pengajuan->alamat_instansi,
@@ -89,18 +101,18 @@ class SuratMagangService
             return null;
         }
 
-       $mime = mime_content_type($path);
+        $mime = mime_content_type($path);
 
-if (! in_array($mime, ['image/png', 'image/jpeg'], true)) {
-    return null;
-}
+        if (! in_array($mime, ['image/png', 'image/jpeg'], true)) {
+            return null;
+        }
 
-$konten = file_get_contents($path);
+        $konten = file_get_contents($path);
 
-if ($konten === false) {
-    return null;
-}
+        if ($konten === false) {
+            return null;
+        }
 
-return 'data:' . $mime . ';base64,' . base64_encode($konten);
+        return 'data:' . $mime . ';base64,' . base64_encode($konten);
     }
 }
