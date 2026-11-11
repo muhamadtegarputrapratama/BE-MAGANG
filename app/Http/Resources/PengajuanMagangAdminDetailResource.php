@@ -19,6 +19,7 @@ class PengajuanMagangAdminDetailResource extends PengajuanMagangAdminResource
             'berkas'                => $this->daftarBerkas(),
             'bukti_spp_url'         => $this->urlBerkas('bukti-spp', 'preview'),
             'surat_rekomendasi_url' => $this->urlBerkas('surat-rekomendasi', 'preview'),
+            'status' => $this->status->value,
         ]);
     }
 
