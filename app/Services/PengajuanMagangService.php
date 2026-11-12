@@ -15,14 +15,27 @@ use Throwable;
 
 class PengajuanMagangService
 {
+    /**
+     * Singkatan yang selalu ditulis KAPITAL pada nama instansi dan alamat
+     * (mis. "pt" atau "Pt" menjadi "PT"). Tambahan bisa dibuat di config/magang.php
+     * lewat kunci 'singkatan_instansi' (array string) tanpa mengubah kode ini.
+     */
+    private const SINGKATAN = [
+        'pt', 'cv', 'ud', 'pd', 'bumn', 'bumd', 'upt', 'uptd',
+        'kph', 'ksda', 'bksda', 'bbksda', 'bpdas', 'bpdashl', 'bpkh', 'bpth',
+        'tn', 'tni', 'polri', 'klhk', 'klh', 'brin', 'lipi', 'ipb', 'ui', 'ugm', 'itb', 'lsm',
+        'dki', 'diy', 'ntt', 'ntb', 'ri', 'rt', 'rw', 'km',
+        'ii', 'iii', 'iv', 'vi', 'vii', 'viii', 'ix',
+    ];
+
     public function __construct(private SuratPengajuanService $surat) {}
 
     public function buatDraft(User $user, array $data): PengajuanMagang
     {
         $pengajuan = new PengajuanMagang();
 
-        $pengajuan->instansi = $this->formatNama($data['instansi']);
-        $pengajuan->alamat_instansi = $this->formatNama($data['alamat_instansi']);
+        $pengajuan->instansi = $this->formatInstansi($data['instansi']);
+        $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
         $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
         $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
@@ -58,8 +71,8 @@ class PengajuanMagangService
             $pengajuan->file_surat_pengajuan_kedua,
         ];
 
-        $pengajuan->instansi = $this->formatNama($data['instansi']);
-        $pengajuan->alamat_instansi = $this->formatNama($data['alamat_instansi']);
+        $pengajuan->instansi = $this->formatInstansi($data['instansi']);
+        $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
         $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
         $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
 
@@ -288,8 +301,8 @@ class PengajuanMagangService
     private function isiInstansiKedua(PengajuanMagang $pengajuan, array $data): void
     {
         if (filled($data['instansi_kedua'] ?? null)) {
-            $pengajuan->instansi_kedua = $this->formatNama($data['instansi_kedua']);
-            $pengajuan->alamat_instansi_kedua = $this->formatNama($data['alamat_instansi_kedua']);
+            $pengajuan->instansi_kedua = $this->formatInstansi($data['instansi_kedua']);
+            $pengajuan->alamat_instansi_kedua = $this->formatInstansi($data['alamat_instansi_kedua']);
             $pengajuan->tanggal_mulai_kedua = $data['tanggal_mulai_kedua'];
             $pengajuan->tanggal_selesai_kedua = $data['tanggal_selesai_kedua'];
 
@@ -306,57 +319,80 @@ class PengajuanMagangService
      * Menyusun daftar kelompok: ketua selalu di urutan pertama, lalu anggota tambahan.
      * Total dibatasi config('magang.maks_anggota') (default 10, termasuk ketua).
      */
+    private function susunAnggota(User $user, ?array $anggotaTambahan): array
+    {
+        $nimKetua = strtoupper((string) $user->nim);
 
-private function susunAnggota(User $user, ?array $anggotaTambahan): array
-{
-    $nimKetua = strtoupper((string) $user->nim);
-
-    $anggota = [
-        [
-            'user_id' => $user->id,
-            'nama' => $user->name,
-            'nim' => $user->nim,
-            'departemen' => $user->departemen,
-        ],
-    ];
-
-    foreach ($anggotaTambahan ?? [] as $member) {
-        $nim = strtoupper(trim($member['nim']));
-
-        if ($nim === $nimKetua) {
-            throw ValidationException::withMessages([
-                'anggota' => 'NIM ketua kelompok tidak perlu dimasukkan kembali.',
-            ]);
-        }
-
-        // Ambil departemen otomatis berdasarkan NIM
-        $departemen = Departemen::dariNim($nim);
-
-        if (! $departemen) {
-            throw ValidationException::withMessages([
-                "anggota" => "NIM {$nim} memiliki kode departemen yang tidak dikenal.",
-            ]);
-        }
-
-        $anggota[] = [
-            'user_id' => null,
-            'nama' => $this->formatNama($member['nama']),
-            'nim' => $nim,
-            'departemen' => $departemen['kode'],
+        $anggota = [
+            [
+                'user_id' => $user->id,
+                'nama' => $user->name,
+                'nim' => $user->nim,
+                'departemen' => $user->departemen,
+            ],
         ];
+
+        foreach ($anggotaTambahan ?? [] as $member) {
+            $nim = strtoupper(trim($member['nim']));
+
+            if ($nim === $nimKetua) {
+                throw ValidationException::withMessages([
+                    'anggota' => 'NIM ketua kelompok tidak perlu dimasukkan kembali.',
+                ]);
+            }
+
+            // Ambil departemen otomatis berdasarkan NIM
+            $departemen = Departemen::dariNim($nim);
+
+            if (! $departemen) {
+                throw ValidationException::withMessages([
+                    "anggota" => "NIM {$nim} memiliki kode departemen yang tidak dikenal.",
+                ]);
+            }
+
+            $anggota[] = [
+                'user_id' => null,
+                'nama' => $this->formatNama($member['nama']),
+                'nim' => $nim,
+                'departemen' => $departemen['kode'],
+            ];
+        }
+
+        $maks = (int) config('magang.maks_anggota', 10);
+
+        if (count($anggota) > $maks) {
+            throw ValidationException::withMessages([
+                'anggota' => "Maksimal {$maks} mahasiswa per pengajuan (termasuk ketua).",
+            ]);
+        }
+
+        return $anggota;
     }
 
-    $maks = (int) config('magang.maks_anggota', 10);
+    /**
+     * Nama instansi / alamat: tiap kata diawali huruf kapital, dan singkatan
+     * (PT, CV, KPH, KM, RT, dst.) ditulis kapital penuh.
+     */
+    private function formatInstansi(string $value): string
+    {
+        $value = $this->formatNama($value);
 
-    if (count($anggota) > $maks) {
-        throw ValidationException::withMessages([
-            'anggota' => "Maksimal {$maks} mahasiswa per pengajuan (termasuk ketua).",
-        ]);
+        $singkatan = array_unique(array_map(
+            'mb_strtolower',
+            array_merge(self::SINGKATAN, (array) config('magang.singkatan_instansi', []))
+        ));
+
+        $pola = '/\b(' . implode('|', array_map(
+            fn ($kata) => preg_quote($kata, '/'),
+            $singkatan
+        )) . ')\b/iu';
+
+        return preg_replace_callback(
+            $pola,
+            fn ($cocok) => mb_strtoupper($cocok[1]),
+            $value
+        );
     }
-
-    return $anggota;
-}
-
 
     private function formatNama(string $value): string
     {
