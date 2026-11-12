@@ -26,9 +26,9 @@ class AuthController extends Controller
         $data = $request->validated();
 
         $data['name'] = preg_replace_callback(
-       "/(^|[\s'-])([\p{L}])/u",
-          fn ($matches) => $matches[1] . mb_strtoupper($matches[2]),
-          mb_strtolower($data['name'])
+        "/(^|[\s-])([\p{L}])/u",
+        fn ($matches) => $matches[1] . mb_strtoupper($matches[2]),
+        mb_strtolower($data['name'])
 );
 
         // Departemen ditentukan backend berdasarkan prefix NIM.
