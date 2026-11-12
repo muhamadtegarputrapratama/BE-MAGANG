@@ -399,7 +399,7 @@ class PengajuanMagangService
         $value = mb_strtolower(trim($value));
 
         return preg_replace_callback(
-            "/(^|[\s'-])([\p{L}])/u",
+            "/(^|[\s-])([\p{L}])/u",
             fn ($matches) => $matches[1] . mb_strtoupper($matches[2]),
             $value
         );
