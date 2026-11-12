@@ -16,17 +16,32 @@
         }
 
         body {
-            font-family: "DejaVu Sans", Arial, Helvetica, sans-serif;
-            font-size: 10.5pt;
-            line-height: 1.4;
+            /* Carlito = pengganti Calibri (metrik sama). Harus diregistrasi di dompdf, kalau tidak jatuh ke DejaVu Sans */
+            font-family: "Carlito", "Calibri", "DejaVu Sans", Arial, Helvetica, sans-serif;
+            font-size: 11pt;
+            line-height: 1.35;
             color: #111111;
         }
 
+        /* ORNAMEN KIRI: 1 gambar (biru gradasi + abu), mulai ~15,9cm dari atas kertas.
+           top/left dihitung dari area konten: top = posisi kertas - 1.2cm, left -2.3cm = 0.3cm dari tepi kertas */
         .orn {
             position: fixed;
             left: -2.3cm;
-            /* = 0.3cm dari tepi kertas */
+            top: 14.7cm;
             width: 1.4cm;
+            height: 13.1cm;
+        }
+
+        /* FOOTER: tengah, dekat tepi bawah kertas */
+        .footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: -1.05cm;
+            text-align: center;
+            font-size: 11pt;
+            color: #222222;
         }
 
         table.kop {
@@ -128,9 +143,9 @@
             margin-bottom: 20px;
         }
 
-        /* Tampilan 1 orang */
+        /* Tampilan 1 orang (sejajar dengan margin teks, sama seperti surat asli) */
         table.mhs {
-            margin: 4px 0 14px 20px;
+            margin: 4px 0 14px 0;
             border-collapse: collapse;
         }
 
@@ -144,7 +159,7 @@
             width: 100%;
             border-collapse: collapse;
             margin: 6px 0 16px 0;
-            font-size: 10pt;
+            font-size: 10.5pt;
         }
 
         table.anggota thead {
@@ -200,15 +215,24 @@
 
 <body>
 
-    {{-- ORNAMEN KIRI: biru (gradasi bertahap) lalu abu, di bagian bawah halaman --}}
     @php
-        $ornamen = [[23.5, 1.3, '#b8bbc0'], [24.8, 1.3, '#a9acb2'], [26.1, 1.3, '#9a9da3'], [27.4, 1.3, '#8c8f95']];
+        // Ornamen kiri: taruh file di public/images/ornamen-kiri.png
+        $ornPath = public_path('images/ornamen-kiri.png');
+        $ornData = file_exists($ornPath)
+            ? 'data:image/png;base64,' . base64_encode(file_get_contents($ornPath))
+            : null;
+
+        // Rapikan penulisan nama instansi: "Pt.thudzahra jaya abadi" -> "PT Thudzahra Jaya Abadi"
+        $instansiRapi = trim($instansi);
+        if (preg_match('/^pt\.?\s*(.+)$/i', $instansiRapi, $m)) {
+            $instansiRapi = 'PT ' . ucwords($m[1]);
+        }
     @endphp
 
-    @foreach ($ornamen as $o)
-        <div class="orn"
-            style="top: {{ $o[0] }}cm; height: {{ $o[1] }}cm; background: {{ $o[2] }};"></div>
-    @endforeach
+    {{-- ORNAMEN KIRI --}}
+    @if ($ornData)
+        <img class="orn" src="{{ $ornData }}" alt="">
+    @endif
 
 
     {{-- FOOTER --}}
@@ -291,7 +315,7 @@
     ========================== --}}
 
     <p class="tujuan">
-        Yth. Pimpinan {{ $instansi }}<br>
+        Yth. Pimpinan {{ $instansiRapi }}<br>
         {!! nl2br(e($alamat)) !!}
     </p>
 
@@ -371,7 +395,7 @@
     ========================== --}}
 
     <p>
-        Bermaksud untuk melaksanakan Magang di {{ $instansi }}
+        Bermaksud untuk melaksanakan Magang di {{ $instansiRapi }}
         pada tanggal {{ $tanggalMulai }} &ndash; {{ $tanggalSelesai }}.
         Sehubungan dengan hal tersebut, kami mohon Saudara berkenan
         menerima mahasiswa kami untuk melaksanakan magang tersebut.
