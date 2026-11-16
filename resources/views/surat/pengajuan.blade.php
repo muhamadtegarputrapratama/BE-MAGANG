@@ -119,6 +119,24 @@
             line-height: 1.35;
             page-break-inside: avoid;
         }
+
+        table.lampiran-tabel {
+            border-collapse: collapse;
+        }
+
+        table.lampiran-tabel td {
+            vertical-align: top;
+            padding: 0;
+        }
+
+        table.lampiran-tabel td.lampiran-label {
+            white-space: nowrap;
+            padding-right: 6px;
+        }
+
+        table.lampiran-tabel td.lampiran-no {
+            width: 0.6cm;
+        }
     </style>
 </head>
 
@@ -154,7 +172,8 @@
         ->values();
 
     $daftarLampiran = $lampiran ?? [
-        'Surat Rekomendasi Dosen Pembimbing Magang'
+        'Bukti SPP',
+        'Surat Rekomendasi Dosen Pembimbing Magang',
     ];
 @endphp
 
@@ -258,15 +277,21 @@
 
 
     <div class="lampiran">
-        Dokumen persyaratan yang dilampirkan:<br>
-
-        @if (count($daftarLampiran) > 1)
-            @foreach ($daftarLampiran as $i => $item)
-                {{ $i + 1 }}. {{ $item }}<br>
-            @endforeach
-        @else
-            {{ $daftarLampiran[0] ?? '' }}
-        @endif
+        <table class="lampiran-tabel">
+            <tr>
+                <td class="lampiran-label">Dokumen persyaratan yang dilampirkan:</td>
+                <td>
+                    <table class="lampiran-tabel">
+                        @foreach ($daftarLampiran as $i => $item)
+                            <tr>
+                                <td class="lampiran-no">{{ $i + 1 }}.</td>
+                                <td>{{ $item }}</td>
+                            </tr>
+                        @endforeach
+                    </table>
+                </td>
+            </tr>
+        </table>
     </div>
 
 </body>
