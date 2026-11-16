@@ -106,6 +106,133 @@ class PengajuanMagangService
     }
 
     /**
+     * Memperbarui data pengajuan magang oleh admin (termasuk data mahasiswa pengaju,
+     * anggota kelompok, instansi 1, dan instansi 2).
+     *
+     * @param array<string, mixed> $data
+     * @throws ValidationException
+     */
+    public function perbaruiOlehAdmin(
+        PengajuanMagang $pengajuan,
+        array $data
+    ): PengajuanMagang {
+        $pengajuan->loadMissing('user');
+        $user = $pengajuan->user;
+
+        return DB::transaction(function () use ($pengajuan, $user, $data): PengajuanMagang {
+            $fileLama = [];
+            $userDiubah = false;
+
+            // 1. Data Mahasiswa Pengaju
+            if (isset($data['nama'])) {
+                $user->name = $this->formatNama($data['nama']);
+                $pengajuan->nama = $user->name;
+                $userDiubah = true;
+            }
+
+            if (isset($data['nim'])) {
+                $user->nim = strtoupper(trim($data['nim']));
+                $departemen = Departemen::dariNim($user->nim);
+
+                if (! $departemen) {
+                    throw ValidationException::withMessages([
+                        'nim' => 'Departemen untuk NIM ini tidak dikenali.',
+                    ]);
+                }
+
+                $user->departemen = $departemen['kode'];
+                $userDiubah = true;
+            }
+
+            if ($userDiubah) {
+                $user->save();
+            }
+
+            // 2. Data Instansi Pertama
+            if (isset($data['instansi'])) {
+                $pengajuan->instansi = $this->formatInstansi($data['instansi']);
+            }
+
+            if (isset($data['alamat_instansi'])) {
+                $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
+            }
+
+            if (isset($data['tanggal_mulai'])) {
+                $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+            }
+
+            if (isset($data['tanggal_selesai'])) {
+                $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+            }
+
+            // 3. Data Instansi Kedua
+            if (array_key_exists('instansi_kedua', $data)) {
+                if (blank($data['instansi_kedua'])) {
+                    $pengajuan->instansi_kedua = null;
+                    $pengajuan->alamat_instansi_kedua = null;
+                    $pengajuan->tanggal_mulai_kedua = null;
+                    $pengajuan->tanggal_selesai_kedua = null;
+
+                    if ($pengajuan->file_surat_pengajuan_kedua) {
+                        $fileLama[] = $pengajuan->file_surat_pengajuan_kedua;
+                        $pengajuan->file_surat_pengajuan_kedua = null;
+                    }
+                } else {
+                    $this->isiInstansiKedua($pengajuan, $data);
+                }
+            }
+
+            // 4. Data Anggota Kelompok
+            if (array_key_exists('anggota', $data)) {
+                $nimKetua = strtoupper((string) $user->nim);
+                $anggotaTambahan = array_values(array_filter(
+                    (array) ($data['anggota'] ?? []),
+                    function ($member) use ($nimKetua): bool {
+                        return strtoupper(trim((string) ($member['nim'] ?? ''))) !== $nimKetua;
+                    }
+                ));
+
+                $pengajuan->anggota = $this->susunAnggota($user, $anggotaTambahan);
+            } elseif ($userDiubah && ! empty($pengajuan->anggota)) {
+                $nimLamaKetua = strtoupper((string) ($user->getOriginal('nim') ?? $user->nim));
+                $anggotaLama = array_values(array_filter(
+                    $pengajuan->anggota,
+                    function ($member) use ($nimLamaKetua): bool {
+                        return strtoupper(trim((string) ($member['nim'] ?? ''))) !== $nimLamaKetua;
+                    }
+                ));
+
+                $pengajuan->anggota = $this->susunAnggota($user, $anggotaLama);
+            }
+
+            $pengajuan->save();
+
+            // 5. Render ulang surat pengajuan bila sudah ditandatangani
+            if ($pengajuan->sudahDitandatangani()) {
+                if ($pengajuan->file_surat_pengajuan) {
+                    $fileLama[] = $pengajuan->file_surat_pengajuan;
+                }
+                $pengajuan->file_surat_pengajuan = $this->surat->simpan($pengajuan, 1);
+
+                if ($pengajuan->jumlahInstansi() === 2) {
+                    if ($pengajuan->file_surat_pengajuan_kedua) {
+                        $fileLama[] = $pengajuan->file_surat_pengajuan_kedua;
+                    }
+                    $pengajuan->file_surat_pengajuan_kedua = $this->surat->simpan($pengajuan, 2);
+                }
+
+                $pengajuan->save();
+            }
+
+            foreach (array_unique($fileLama) as $path) {
+                $this->hapusFile($path);
+            }
+
+            return $pengajuan;
+        });
+    }
+
+    /**
      * Tahap 2: preview surat untuk instansi ke-$urutan (1 atau 2).
      * Kalau sudah ditandatangani, tampilkan versi final.
      */

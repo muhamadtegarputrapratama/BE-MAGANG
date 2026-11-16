@@ -10,16 +10,19 @@ use App\Http\Resources\PengajuanMagangAdminDetailResource;
 use App\Http\Resources\PengajuanMagangAdminResource;
 use App\Models\PengajuanMagang;
 use App\Models\User;
+use App\Services\PengajuanMagangService;
 use App\Services\VerifikasiPengajuanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use App\Support\Departemen;
 
 class PengajuanMagangController extends Controller
 {
-    public function __construct(private VerifikasiPengajuanService $verifikasi) {}
+    public function __construct(
+        private VerifikasiPengajuanService $verifikasi,
+        private PengajuanMagangService $pengajuanService
+    ) {}
 
     /**
      * Halaman tabel: pengajuan yang sudah dikirim (tanpa draft), 20 per halaman.
@@ -88,7 +91,8 @@ class PengajuanMagangController extends Controller
     }
 
     /**
-     * Admin mengedit data pengajuan magang.
+     * Admin mengedit data pengajuan magang (termasuk data mahasiswa pengaju,
+     * anggota kelompok, instansi 1, dan instansi 2).
      */
     public function update(
         UpdatePengajuanMagangRequest $request,
@@ -112,26 +116,10 @@ class PengajuanMagangController extends Controller
             'Pengajuan yang sudah disetujui tidak dapat diedit.'
         );
 
-        $pengajuan->fill($request->validated());
-
-        // Instansi kedua dikosongkan: bersihkan data turunannya dan surat kedua yang sudah ditandatangani.
-        $fileKedua = null;
-
-        if (blank($pengajuan->instansi_kedua)) {
-            $pengajuan->instansi_kedua = null;
-            $pengajuan->alamat_instansi_kedua = null;
-            $pengajuan->tanggal_mulai_kedua = null;
-            $pengajuan->tanggal_selesai_kedua = null;
-
-            $fileKedua = $pengajuan->file_surat_pengajuan_kedua;
-            $pengajuan->file_surat_pengajuan_kedua = null;
-        }
-
-        $pengajuan->save();
-
-        if ($fileKedua) {
-            Storage::disk('local')->delete($fileKedua);
-        }
+        $pengajuan = $this->pengajuanService->perbaruiOlehAdmin(
+            $pengajuan,
+            $request->validated()
+        );
 
         return (new PengajuanMagangAdminDetailResource(
             $pengajuan->load('user')

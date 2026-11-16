@@ -13,6 +13,7 @@ class PengajuanMagang extends Model
 
     // Nomor surat dan path file sengaja tidak di sini: diisi sistem, bukan lewat mass assignment.
     protected $fillable = [
+        'nama',
         'anggota',
         'instansi',
         'alamat_instansi',
