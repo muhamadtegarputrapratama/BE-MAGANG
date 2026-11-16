@@ -215,7 +215,7 @@
         @endunless
 
         <tr>
-            <td class="label" style="padding-top: 8px;">Program studi/Departemen</td>
+            <td class="label" style="padding-top: 8px;">Departemen</td>
             <td class="titik" style="padding-top: 8px;">:</td>
             <td style="padding-top: 8px;">
                 <table class="daftar">
