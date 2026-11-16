@@ -47,6 +47,7 @@ class AuthController extends Controller
                 'nim' => $data['nim'],
                 'departemen' => $departemen['kode'],
                 'email' => $data['email'],
+                'no_wa' => $data['no_wa'],
                 'password' => $data['password'],
                 'role' => 'mahasiswa',
             ]);

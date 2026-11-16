@@ -11,7 +11,7 @@ class Departemen
      */
     private const PREFIX_NIM = [
         'E141' => 'MNH',
-        'E241' => 'THH',
+        'E241' => 'HH',
         'E341' => 'KSHE',
         'E441' => 'SVK',
     ];

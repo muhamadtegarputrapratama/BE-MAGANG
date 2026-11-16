@@ -33,13 +33,9 @@ class RegisterRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'nim' => [
-                'required',
-                'string',
-                'regex:/^E(141|241|341|441)[0-9]{7}$/',
-                'unique:users,nim',
-            ],
+            'nim' => ['required', 'string', 'regex:/^E(141|241|341|441)[0-9]{7}$/', 'unique:users,nim'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'no_wa' => ['required', 'string', 'regex:/^[0-9]{10,15}$/','unique:users,no_wa',],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
         ];
     }
@@ -54,6 +50,9 @@ class RegisterRequest extends FormRequest
             'email.required' => 'Email wajib diisi.',
             'email.email' => 'Format email tidak valid.',
             'email.unique' => 'Email sudah terdaftar.',
+            'no_wa.required' => 'Nomor WhatsApp wajib diisi.',
+            'no_wa.regex' => 'Nomor WhatsApp harus terdiri dari 10–15 digit angka.',
+            'no_wa.unique' => 'Nomor WhatsApp sudah terdaftar.',
             'password.required' => 'Password wajib diisi.',
             'password.min' => 'Password minimal 8 karakter.',
             'password.confirmed' => 'Konfirmasi password tidak cocok.',
