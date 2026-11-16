@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Enums\StatusPengajuan;
+use App\Support\Departemen;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -10,10 +11,22 @@ class PengajuanMagangResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $this->resource->loadMissing('user');
+
         $setuju = $this->status === StatusPengajuan::Setuju;
+        $kodeDepartemen = $this->user?->departemen;
 
         return [
-            'id'              => $this->id,
+            'id' => $this->id,
+
+            // Data ketua selalu dari akun, jadi ikut berubah bila admin mengedit nama / NIM.
+            'mahasiswa' => [
+                'nama'            => $this->user?->name,
+                'nim'             => $this->user?->nim,
+                'departemen'      => $kodeDepartemen ? Departemen::nama($kodeDepartemen) : null,
+                'departemen_kode' => $kodeDepartemen,
+            ],
+
             'instansi'        => $this->instansi,
             'alamat_instansi' => $this->alamat_instansi,
             'tanggal_mulai'   => $this->tanggal_mulai?->toDateString(),
@@ -28,8 +41,17 @@ class PengajuanMagangResource extends JsonResource
             // Banyaknya surat = banyaknya instansi (1 atau 2)
             'jumlah_surat' => $this->jumlahInstansi(),
 
-            // Ketua (urutan pertama, memuat user_id) + anggota kelompok
-            'anggota' => $this->anggota,
+            // Anggota kelompok SELAIN ketua (ketua ada di 'mahasiswa').
+            // Ketua sengaja tidak ikut, supaya saat revisi tidak terkirim balik sebagai anggota.
+            'jumlah_mahasiswa' => $this->jumlahMahasiswa(),
+            'anggota' => collect($this->anggotaTambahan())
+                ->map(fn (array $a) => [
+                    'nama'       => $a['nama'],
+                    'nim'        => $a['nim'],
+                    'departemen' => $a['departemen'] ? Departemen::nama($a['departemen']) : null,
+                ])
+                ->values()
+                ->all(),
 
             'status' => [
                 'value' => $this->status->value,
@@ -52,4 +74,4 @@ class PengajuanMagangResource extends JsonResource
             'dibuat_pada'     => $this->created_at->toIso8601String(),
         ];
     }
-}   
+}

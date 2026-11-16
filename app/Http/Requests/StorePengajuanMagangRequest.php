@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests;
 
-use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StorePengajuanMagangRequest extends FormRequest
@@ -12,6 +11,31 @@ class StorePengajuanMagangRequest extends FormRequest
         return true;
     }
 
+    /**
+     * Ketua kelompok ditambahkan otomatis dari akun, jadi tidak perlu ada di daftar anggota.
+     * Saat revisi, data ketua lama bisa ikut terkirim bersama daftar anggota: entri itu
+     * dibuang di sini (bukan ditolak), supaya mahasiswa tidak terhenti oleh "NIM sudah dipakai".
+     */
+    protected function prepareForValidation(): void
+    {
+        $anggota = $this->input('anggota');
+
+        if (! is_array($anggota)) {
+            return;
+        }
+
+        $nimKetua = strtoupper(trim((string) $this->user()?->nim));
+
+        $this->merge([
+            'anggota' => array_values(array_filter(
+                $anggota,
+                fn ($a) => ! is_array($a)
+                    || $nimKetua === ''
+                    || strtoupper(trim((string) ($a['nim'] ?? ''))) !== $nimKetua
+            )),
+        ]);
+    }
+
     public function rules(): array
     {
         $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
@@ -19,78 +43,23 @@ class StorePengajuanMagangRequest extends FormRequest
         // Total mahasiswa per pengajuan = 10 TERMASUK ketua, jadi anggota tambahan maksimal 9.
         $maksTambahan = max((int) config('magang.maks_anggota', 10) - 1, 0);
 
+        $mulaiMinimal = $isUpdate ? 'after_or_equal:1900-01-01' : 'after_or_equal:today';
+
         return [
-            'instansi' => [
-                'required',
-                'string',
-                'max:255',
-            ],
-
-            'alamat_instansi' => [
-                'required',
-                'string',
-                'max:500',
-            ],
-
-            'tanggal_mulai' => [
-                'required',
-                'date',
-                $isUpdate
-                    ? 'after_or_equal:1900-01-01'
-                    : 'after_or_equal:today',
-            ],
-
-            'tanggal_selesai' => [
-                'required',
-                'date',
-                'after:tanggal_mulai',
-            ],
+            'instansi' => ['required', 'string', 'max:255'],
+            'alamat_instansi' => ['required', 'string', 'max:500'],
+            'tanggal_mulai' => ['required', 'date', $mulaiMinimal],
+            'tanggal_selesai' => ['required', 'date', 'after:tanggal_mulai'],
 
             // Instansi kedua (opsional) -> menghasilkan surat kedua
-            'instansi_kedua' => [
-                'nullable',
-                'string',
-                'max:255',
-                'different:instansi',
-            ],
-
-            'alamat_instansi_kedua' => [
-                'required_with:instansi_kedua',
-                'nullable',
-                'string',
-                'max:500',
-            ],
-
-            'tanggal_mulai_kedua' => [
-                'required_with:instansi_kedua',
-                'nullable',
-                'date',
-                $isUpdate
-                    ? 'after_or_equal:1900-01-01'
-                    : 'after_or_equal:today',
-            ],
-
-            'tanggal_selesai_kedua' => [
-                'required_with:instansi_kedua',
-                'nullable',
-                'date',
-                'after:tanggal_mulai_kedua',
-            ],
+            'instansi_kedua' => ['nullable', 'string', 'max:255', 'different:instansi'],
+            'alamat_instansi_kedua' => ['required_with:instansi_kedua', 'nullable', 'string', 'max:500'],
+            'tanggal_mulai_kedua' => ['required_with:instansi_kedua', 'nullable', 'date', $mulaiMinimal],
+            'tanggal_selesai_kedua' => ['required_with:instansi_kedua', 'nullable', 'date', 'after:tanggal_mulai_kedua'],
 
             // Anggota tambahan selain ketua (ketua ditambahkan otomatis oleh service)
-            'anggota' => [
-                'sometimes',
-                'nullable',
-                'array',
-                "max:{$maksTambahan}",
-            ],
-
-            'anggota.*.nama' => [
-                'required',
-                'string',
-                'max:255',
-            ],
-
+            'anggota' => ['sometimes', 'nullable', 'array', "max:{$maksTambahan}"],
+            'anggota.*.nama' => ['required', 'string', 'max:255'],
             'anggota.*.nim' => [
                 'required',
                 'string',
@@ -108,19 +77,6 @@ class StorePengajuanMagangRequest extends FormRequest
             'anggota.*.nim.distinct'   => 'NIM anggota tidak boleh sama.',
             'instansi_kedua.different' => 'Instansi kedua tidak boleh sama dengan instansi pertama.',
         ];
-    }
-
-    public function withValidator(Validator $validator): void
-    {
-        $validator->after(function (Validator $v) {
-            $nimKetua = strtoupper((string) $this->user()?->nim);
-
-            foreach ((array) $this->input('anggota', []) as $i => $a) {
-                if (strtoupper((string) ($a['nim'] ?? '')) === $nimKetua) {
-                    $v->errors()->add("anggota.$i.nim", 'NIM ketua kelompok tidak perlu dimasukkan kembali.');
-                }
-            }
-        });
     }
 
     public function attributes(): array

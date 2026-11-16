@@ -117,17 +117,61 @@ class PengajuanMagang extends Model
         };
     }
 
+    /* =========================================================
+       MAHASISWA: ketua selalu dari akun (users), anggota dari kolom "anggota"
+    ========================================================= */
+
     /**
-     * Daftar mahasiswa yang dicetak di surat: pengaju (ketua) selalu nomor 1, lalu anggota lain.
-     * Kolom "anggota" sudah memuat ketua di urutan pertama, jadi baris dengan NIM yang sama
-     * dengan pengaju dilewati agar tidak tercetak dua kali (data lama tanpa ketua tetap aman).
-     * Departemen diubah dari kode menjadi nama. Total maksimal config('magang.maks_anggota').
+     * Anggota kelompok SELAIN ketua.
+     *
+     * Ketua tidak diambil dari kolom "anggota", melainkan selalu dari akun (users),
+     * supaya nama / NIM ketua tidak pernah usang atau dobel setelah diubah admin.
+     * Entri ketua di kolom "anggota" (snapshot lama) dikenali dari "user_id" yang terisi
+     * atau NIM yang sama dengan ketua, lalu dilewati. NIM kembar juga dilewati.
+     *
+     * @return array<int, array{nama: string, nim: string, departemen: ?string}>
+     */
+    public function anggotaTambahan(): array
+    {
+        $this->loadMissing('user');
+
+        $terpakai = [strtoupper(trim((string) $this->user?->nim)) => true];
+        $hasil = [];
+
+        foreach ($this->anggota ?? [] as $a) {
+            $nim = strtoupper(trim((string) ($a['nim'] ?? '')));
+
+            if ($nim === '' || ! empty($a['user_id']) || isset($terpakai[$nim])) {
+                continue;
+            }
+
+            $terpakai[$nim] = true;
+
+            $hasil[] = [
+                'nama'       => (string) ($a['nama'] ?? ''),
+                'nim'        => $nim,
+                'departemen' => $a['departemen'] ?? null, // kode departemen
+            ];
+        }
+
+        return $hasil;
+    }
+
+    /** Jumlah mahasiswa dalam pengajuan, termasuk ketua. */
+    public function jumlahMahasiswa(): int
+    {
+        return 1 + count($this->anggotaTambahan());
+    }
+
+    /**
+     * Daftar mahasiswa yang dicetak di surat: pengaju (ketua) selalu nomor 1 dengan data
+     * terbaru dari akun, lalu anggota tambahan. Departemen diubah dari kode menjadi nama.
+     * Total maksimal config('magang.maks_anggota').
      */
     public function daftarAnggotaCetak(): array
     {
         $this->loadMissing('user');
         $user = $this->user;
-        $nimPengaju = strtoupper((string) $user->nim);
 
         $daftar = [[
             'nama'       => $user->name,
@@ -135,11 +179,7 @@ class PengajuanMagang extends Model
             'departemen' => Departemen::nama($user->departemen),
         ]];
 
-        foreach ($this->anggota ?? [] as $a) {
-            if (strtoupper((string) ($a['nim'] ?? '')) === $nimPengaju) {
-                continue;
-            }
-
+        foreach ($this->anggotaTambahan() as $a) {
             $daftar[] = [
                 'nama'       => $a['nama'],
                 'nim'        => $a['nim'],

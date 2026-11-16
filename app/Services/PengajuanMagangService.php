@@ -5,12 +5,12 @@ namespace App\Services;
 use App\Enums\StatusPengajuan;
 use App\Models\PengajuanMagang;
 use App\Models\User;
+use App\Support\Departemen;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use App\Support\Departemen;
 use Throwable;
 
 class PengajuanMagangService
@@ -30,6 +30,10 @@ class PengajuanMagangService
 
     public function __construct(private SuratPengajuanService $surat) {}
 
+    /* =========================================================
+       MAHASISWA
+    ========================================================= */
+
     public function buatDraft(User $user, array $data): PengajuanMagang
     {
         $pengajuan = new PengajuanMagang();
@@ -44,13 +48,7 @@ class PengajuanMagangService
 
         $pengajuan->user_id = $user->id;
         $pengajuan->nama = $user->name;
-
-        // Simpan ketua dan anggota kelompok.
-        $pengajuan->anggota = $this->susunAnggota(
-            $user,
-            $data['anggota'] ?? []
-        );
-
+        $pengajuan->anggota = $this->susunAnggota($user, $data['anggota'] ?? []);
         $pengajuan->status = StatusPengajuan::Draft;
         $pengajuan->kode_verifikasi = Str::random(32);
 
@@ -59,11 +57,10 @@ class PengajuanMagangService
         return $pengajuan;
     }
 
-    public function perbarui(
-        PengajuanMagang $pengajuan,
-        array $data
-    ): PengajuanMagang {
+    public function perbarui(PengajuanMagang $pengajuan, array $data): PengajuanMagang
+    {
         $this->pastikanBisaDiedit($pengajuan);
+        $pengajuan->loadMissing('user');
 
         // Surat final instansi 1 dan 2 (bila ada) akan dibatalkan.
         $fileLama = [
@@ -81,15 +78,10 @@ class PengajuanMagangService
             $this->isiInstansiKedua($pengajuan, $data);
         }
 
-        // Perbarui anggota jika dikirim.
-        if (array_key_exists('anggota', $data)) {
-            $pengajuan->loadMissing('user');
-
-            $pengajuan->anggota = $this->susunAnggota(
-                $pengajuan->user,
-                $data['anggota'] ?? []
-            );
-        }
+        // Ketua selalu mengikuti akun (bisa saja sudah diubah admin), anggota tambahan
+        // diganti bila dikirim dan dipertahankan bila tidak.
+        $pengajuan->nama = $pengajuan->user->name;
+        $pengajuan->anggota = $this->anggotaBaru($pengajuan, $data);
 
         // Batalkan tanda tangan sebelumnya.
         $pengajuan->ditandatangani_at = null;
@@ -98,150 +90,9 @@ class PengajuanMagangService
 
         $pengajuan->save();
 
-        foreach ($fileLama as $path) {
-            $this->hapusFile($path);
-        }
+        $this->hapusFiles($fileLama);
 
         return $pengajuan->refresh();
-    }
-
-    /**
-     * Memperbarui data pengajuan magang oleh admin (termasuk data mahasiswa pengaju,
-     * anggota kelompok, instansi 1, dan instansi 2).
-     *
-     * @param array<string, mixed> $data
-     * @throws ValidationException
-     */
-    public function perbaruiOlehAdmin(
-        PengajuanMagang $pengajuan,
-        array $data
-    ): PengajuanMagang {
-        $pengajuan->loadMissing('user');
-        $user = $pengajuan->user;
-
-        // Simpan identitas ketua SEBELUM data user diubah dan disimpan.
-        // (Setelah $user->save(), getOriginal('nim') sudah berisi NIM baru.)
-        $nimLamaKetua = strtoupper(trim((string) $user->nim));
-        $idKetua = (int) $user->id;
-
-        return DB::transaction(function () use ($pengajuan, $user, $data, $nimLamaKetua, $idKetua): PengajuanMagang {
-            $fileLama = [];
-            $userDiubah = false;
-
-            // 1. Data Mahasiswa Pengaju
-            if (isset($data['nama'])) {
-                $user->name = $this->formatNama($data['nama']);
-                $pengajuan->nama = $user->name;
-                $userDiubah = true;
-            }
-
-            if (isset($data['nim'])) {
-                $user->nim = strtoupper(trim($data['nim']));
-                $departemen = Departemen::dariNim($user->nim);
-
-                if (! $departemen) {
-                    throw ValidationException::withMessages([
-                        'nim' => 'Departemen untuk NIM ini tidak dikenali.',
-                    ]);
-                }
-
-                $user->departemen = $departemen['kode'];
-                $userDiubah = true;
-            }
-
-            if ($userDiubah) {
-                $user->save();
-            }
-
-            // 2. Data Instansi Pertama
-            if (isset($data['instansi'])) {
-                $pengajuan->instansi = $this->formatInstansi($data['instansi']);
-            }
-
-            if (isset($data['alamat_instansi'])) {
-                $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
-            }
-
-            if (isset($data['tanggal_mulai'])) {
-                $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
-            }
-
-            if (isset($data['tanggal_selesai'])) {
-                $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
-            }
-
-            // 3. Data Instansi Kedua
-            if (array_key_exists('instansi_kedua', $data)) {
-                if (blank($data['instansi_kedua'])) {
-                    $pengajuan->instansi_kedua = null;
-                    $pengajuan->alamat_instansi_kedua = null;
-                    $pengajuan->tanggal_mulai_kedua = null;
-                    $pengajuan->tanggal_selesai_kedua = null;
-
-                    if ($pengajuan->file_surat_pengajuan_kedua) {
-                        $fileLama[] = $pengajuan->file_surat_pengajuan_kedua;
-                        $pengajuan->file_surat_pengajuan_kedua = null;
-                    }
-                } else {
-                    $this->isiInstansiKedua($pengajuan, $data);
-                }
-            }
-
-            // 4. Data Anggota Kelompok
-            if (array_key_exists('anggota', $data)) {
-                $nimKetua = strtoupper((string) $user->nim);
-                $anggotaTambahan = array_values(array_filter(
-                    (array) ($data['anggota'] ?? []),
-                    function ($member) use ($nimKetua, $nimLamaKetua): bool {
-                        $nim = strtoupper(trim((string) ($member['nim'] ?? '')));
-
-                        // Buang entri ketua (NIM baru maupun NIM lama) dari daftar anggota tambahan.
-                        return $nim !== $nimKetua && $nim !== $nimLamaKetua;
-                    }
-                ));
-
-                $pengajuan->anggota = $this->susunAnggota($user, $anggotaTambahan);
-            } elseif ($userDiubah && ! empty($pengajuan->anggota)) {
-                // Buang entri ketua yang lama (cocok lewat user_id atau NIM lama),
-                // lalu susun ulang dengan data ketua yang baru.
-                $anggotaLama = array_values(array_filter(
-                    $pengajuan->anggota,
-                    function ($member) use ($nimLamaKetua, $idKetua): bool {
-                        $nim = strtoupper(trim((string) ($member['nim'] ?? '')));
-
-                        return (int) ($member['user_id'] ?? 0) !== $idKetua
-                            && $nim !== $nimLamaKetua;
-                    }
-                ));
-
-                $pengajuan->anggota = $this->susunAnggota($user, $anggotaLama);
-            }
-
-            $pengajuan->save();
-
-            // 5. Render ulang surat pengajuan bila sudah ditandatangani
-            if ($pengajuan->sudahDitandatangani()) {
-                if ($pengajuan->file_surat_pengajuan) {
-                    $fileLama[] = $pengajuan->file_surat_pengajuan;
-                }
-                $pengajuan->file_surat_pengajuan = $this->surat->simpan($pengajuan, 1);
-
-                if ($pengajuan->jumlahInstansi() === 2) {
-                    if ($pengajuan->file_surat_pengajuan_kedua) {
-                        $fileLama[] = $pengajuan->file_surat_pengajuan_kedua;
-                    }
-                    $pengajuan->file_surat_pengajuan_kedua = $this->surat->simpan($pengajuan, 2);
-                }
-
-                $pengajuan->save();
-            }
-
-            foreach (array_unique($fileLama) as $path) {
-                $this->hapusFile($path);
-            }
-
-            return $pengajuan;
-        });
     }
 
     /**
@@ -278,9 +129,8 @@ class PengajuanMagangService
      * Tahap 2b: tanda tangan. Surat final dengan QR dibuat dan disimpan,
      * satu PDF untuk tiap instansi (1 atau 2 surat).
      */
-    public function tandaTangani(
-        PengajuanMagang $pengajuan
-    ): PengajuanMagang {
+    public function tandaTangani(PengajuanMagang $pengajuan): PengajuanMagang
+    {
         $this->pastikanBisaDiedit($pengajuan);
 
         if ($pengajuan->sudahDitandatangani()) {
@@ -310,18 +160,15 @@ class PengajuanMagangService
             return $pengajuan->refresh();
         } catch (Throwable $e) {
             // Bersihkan file baru jika proses gagal.
-            foreach ($pathBaru as $path) {
-                $this->hapusFile($path);
-            }
+            $this->hapusFiles($pathBaru);
 
             throw $e;
         }
     }
 
     /** Membatalkan tanda tangan: semua surat final dan QR dihapus, preview kembali tanpa QR. */
-    public function batalkanTandaTangan(
-        PengajuanMagang $pengajuan
-    ): PengajuanMagang {
+    public function batalkanTandaTangan(PengajuanMagang $pengajuan): PengajuanMagang
+    {
         $this->pastikanBisaDiedit($pengajuan);
 
         if (! $pengajuan->sudahDitandatangani()) {
@@ -341,9 +188,7 @@ class PengajuanMagangService
         $pengajuan->save();
 
         // Hapus PDF lama setelah database berhasil disimpan.
-        foreach ($fileLama as $path) {
-            $this->hapusFile($path);
-        }
+        $this->hapusFiles($fileLama);
 
         return $pengajuan->refresh();
     }
@@ -373,30 +218,18 @@ class PengajuanMagangService
         $folder = "pengajuan/{$pengajuan->id}";
         $berkasBaru = [];
         $berkasLama = [
-            $pengajuan->file_bukti_spp,
-            $pengajuan->file_surat_rekomendasi,
+            'file_bukti_spp'         => $pengajuan->file_bukti_spp,
+            'file_surat_rekomendasi' => $pengajuan->file_surat_rekomendasi,
         ];
 
         try {
             // Simpan berkas baru tanpa menghapus berkas lama.
             if ($buktiSpp) {
-                $path = $buktiSpp->store($folder, 'local');
-
-                if (! $path) {
-                    throw new \RuntimeException('Gagal menyimpan bukti SPP.');
-                }
-
-                $berkasBaru['file_bukti_spp'] = $path;
+                $berkasBaru['file_bukti_spp'] = $this->simpanBerkas($buktiSpp, $folder, 'bukti SPP');
             }
 
             if ($suratRekomendasi) {
-                $path = $suratRekomendasi->store($folder, 'local');
-
-                if (! $path) {
-                    throw new \RuntimeException('Gagal menyimpan surat rekomendasi.');
-                }
-
-                $berkasBaru['file_surat_rekomendasi'] = $path;
+                $berkasBaru['file_surat_rekomendasi'] = $this->simpanBerkas($suratRekomendasi, $folder, 'surat rekomendasi');
             }
 
             // Perbarui database dalam transaksi.
@@ -411,20 +244,14 @@ class PengajuanMagangService
             });
         } catch (Throwable $e) {
             // Jika proses gagal, bersihkan berkas baru yang sempat tersimpan.
-            foreach ($berkasBaru as $path) {
-                $this->hapusFile($path);
-            }
+            $this->hapusFiles($berkasBaru);
 
             throw $e;
         }
 
         // Hapus berkas lama hanya setelah database berhasil diperbarui.
         foreach ($berkasBaru as $kolom => $path) {
-            $pathLama = match ($kolom) {
-                'file_bukti_spp' => $berkasLama[0],
-                'file_surat_rekomendasi' => $berkasLama[1],
-                default => null,
-            };
+            $pathLama = $berkasLama[$kolom] ?? null;
 
             if ($pathLama && $pathLama !== $path) {
                 $this->hapusFile($pathLama);
@@ -433,6 +260,128 @@ class PengajuanMagangService
 
         return $pengajuan->refresh();
     }
+
+    /* =========================================================
+       ADMIN
+    ========================================================= */
+
+    /**
+     * Memperbarui data pengajuan magang oleh admin (termasuk data mahasiswa pengaju,
+     * anggota kelompok, instansi 1, dan instansi 2).
+     *
+     * Ketua dan akun mahasiswa adalah satu data: nama / NIM / departemen yang diubah di sini
+     * langsung disimpan ke akun (users), dan ketua di surat selalu dibaca dari akun.
+     *
+     * @param array<string, mixed> $data
+     * @throws ValidationException
+     */
+    public function perbaruiOlehAdmin(PengajuanMagang $pengajuan, array $data): PengajuanMagang
+    {
+        $pengajuan->loadMissing('user');
+
+        $fileBaru = [];
+        $fileLama = [];
+
+        try {
+            DB::transaction(function () use ($pengajuan, $data, &$fileBaru, &$fileLama): void {
+                $user = $pengajuan->user;
+
+                // 1. Data mahasiswa pengaju (akun)
+                if (isset($data['nama'])) {
+                    $user->name = $this->formatNama($data['nama']);
+                }
+
+                if (isset($data['nim'])) {
+                    $nim = strtoupper(trim($data['nim']));
+                    $departemen = Departemen::dariNim($nim);
+
+                    if (! $departemen) {
+                        throw ValidationException::withMessages([
+                            'nim' => 'Departemen untuk NIM ini tidak dikenali.',
+                        ]);
+                    }
+
+                    $user->nim = $nim;
+                    $user->departemen = $departemen['kode'];
+                }
+
+                if ($user->isDirty()) {
+                    $user->save();
+                }
+
+                $pengajuan->nama = $user->name;
+
+                // 2. Instansi pertama
+                if (isset($data['instansi'])) {
+                    $pengajuan->instansi = $this->formatInstansi($data['instansi']);
+                }
+
+                if (isset($data['alamat_instansi'])) {
+                    $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
+                }
+
+                foreach (['tanggal_mulai', 'tanggal_selesai'] as $kolom) {
+                    if (isset($data[$kolom])) {
+                        $pengajuan->{$kolom} = $data[$kolom];
+                    }
+                }
+
+                // 3. Instansi kedua (kosong berarti dihapus beserta surat finalnya)
+                if (array_key_exists('instansi_kedua', $data)) {
+                    $this->isiInstansiKedua($pengajuan, $data);
+
+                    if ($pengajuan->jumlahInstansi() === 1 && $pengajuan->file_surat_pengajuan_kedua) {
+                        $fileLama[] = $pengajuan->file_surat_pengajuan_kedua;
+                        $pengajuan->file_surat_pengajuan_kedua = null;
+                    }
+                }
+
+                // 4. Anggota: ketua dibangun ulang dari akun, jadi tidak ada data ketua lama yang tersisa.
+                $pengajuan->anggota = $this->anggotaBaru($pengajuan, $data);
+
+                $pengajuan->save();
+
+                // 5. Surat yang sudah ditandatangani dirender ulang dengan data terbaru.
+                if ($pengajuan->sudahDitandatangani()) {
+                    foreach ([1 => 'file_surat_pengajuan', 2 => 'file_surat_pengajuan_kedua'] as $urutan => $kolom) {
+                        if ($urutan > $pengajuan->jumlahInstansi()) {
+                            continue;
+                        }
+
+                        if ($pengajuan->{$kolom}) {
+                            $fileLama[] = $pengajuan->{$kolom};
+                        }
+
+                        $path = $this->surat->simpan($pengajuan, $urutan);
+
+                        if (! $path) {
+                            throw new \RuntimeException('Gagal menyimpan ulang surat pengajuan.');
+                        }
+
+                        $fileBaru[] = $path;
+                        $pengajuan->{$kolom} = $path;
+                    }
+
+                    $pengajuan->save();
+                }
+            });
+        } catch (Throwable $e) {
+            // Transaksi dibatalkan: buang surat baru yang sempat dibuat.
+            $this->hapusFiles($fileBaru);
+
+            throw $e;
+        }
+
+        // Surat lama dihapus setelah database berhasil disimpan
+        // (path yang dipakai ulang oleh surat baru tidak ikut dihapus).
+        $this->hapusFiles(array_diff($fileLama, $fileBaru));
+
+        return $pengajuan->refresh();
+    }
+
+    /* =========================================================
+       HELPER
+    ========================================================= */
 
     /**
      * Instansi kedua: terisi bila nama instansi dikirim, selain itu semua kolomnya dikosongkan.
@@ -455,29 +404,43 @@ class PengajuanMagangService
     }
 
     /**
-     * Menyusun daftar kelompok: ketua selalu di urutan pertama, lalu anggota tambahan.
-     * Total dibatasi config('magang.maks_anggota') (default 10, termasuk ketua).
+     * Daftar anggota yang disimpan: anggota tambahan dari $data bila dikirim,
+     * selain itu anggota tambahan yang sudah ada. Ketua selalu disusun ulang dari akun.
+     */
+    private function anggotaBaru(PengajuanMagang $pengajuan, array $data): array
+    {
+        $tambahan = array_key_exists('anggota', $data)
+            ? ($data['anggota'] ?? [])
+            : $pengajuan->anggotaTambahan();
+
+        return $this->susunAnggota($pengajuan->user, $tambahan);
+    }
+
+    /**
+     * Menyusun daftar kelompok: ketua (dari akun) selalu di urutan pertama, lalu anggota tambahan.
+     * Entri yang NIM-nya sama dengan ketua, kembar, atau berasal dari snapshot ketua lama
+     * (punya user_id) dilewati begitu saja. Total dibatasi config('magang.maks_anggota').
      */
     private function susunAnggota(User $user, ?array $anggotaTambahan): array
     {
-        $nimKetua = strtoupper((string) $user->nim);
+        $nimKetua = strtoupper(trim((string) $user->nim));
 
         $anggota = [
             [
-                'user_id' => $user->id,
-                'nama' => $user->name,
-                'nim' => $user->nim,
+                'user_id'    => $user->id,
+                'nama'       => $user->name,
+                'nim'        => $user->nim,
                 'departemen' => $user->departemen,
             ],
         ];
 
-        foreach ($anggotaTambahan ?? [] as $member) {
-            $nim = strtoupper(trim($member['nim']));
+        $terpakai = [$nimKetua => true];
 
-            if ($nim === $nimKetua) {
-                throw ValidationException::withMessages([
-                    'anggota' => 'NIM ketua kelompok tidak perlu dimasukkan kembali.',
-                ]);
+        foreach ($anggotaTambahan ?? [] as $member) {
+            $nim = strtoupper(trim((string) ($member['nim'] ?? '')));
+
+            if ($nim === '' || ! empty($member['user_id']) || isset($terpakai[$nim])) {
+                continue;
             }
 
             // Ambil departemen otomatis berdasarkan NIM
@@ -485,14 +448,16 @@ class PengajuanMagangService
 
             if (! $departemen) {
                 throw ValidationException::withMessages([
-                    "anggota" => "NIM {$nim} memiliki kode departemen yang tidak dikenal.",
+                    'anggota' => "NIM {$nim} memiliki kode departemen yang tidak dikenal.",
                 ]);
             }
 
+            $terpakai[$nim] = true;
+
             $anggota[] = [
-                'user_id' => null,
-                'nama' => $this->formatNama($member['nama']),
-                'nim' => $nim,
+                'user_id'    => null,
+                'nama'       => $this->formatNama((string) ($member['nama'] ?? '')),
+                'nim'        => $nim,
                 'departemen' => $departemen['kode'],
             ];
         }
@@ -544,12 +509,31 @@ class PengajuanMagangService
         );
     }
 
+    private function simpanBerkas(UploadedFile $file, string $folder, string $nama): string
+    {
+        $path = $file->store($folder, 'local');
+
+        if (! $path) {
+            throw new \RuntimeException("Gagal menyimpan {$nama}.");
+        }
+
+        return $path;
+    }
+
     private function pastikanBisaDiedit(PengajuanMagang $pengajuan): void
     {
         if (! $pengajuan->bisaDiedit()) {
             throw ValidationException::withMessages([
                 'status' => 'Pengajuan sudah dikirim dan tidak bisa diubah.',
             ]);
+        }
+    }
+
+    /** @param iterable<int|string, ?string> $paths */
+    private function hapusFiles(iterable $paths): void
+    {
+        foreach ($paths as $path) {
+            $this->hapusFile($path);
         }
     }
 

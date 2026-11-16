@@ -19,7 +19,8 @@ class PengajuanMagangController extends Controller
 
     public function index(Request $request)
     {
-        $daftar = PengajuanMagang::where('user_id', $request->user()->id)
+        $daftar = PengajuanMagang::with('user')
+            ->where('user_id', $request->user()->id)
             ->latest()
             ->get();
 

@@ -19,8 +19,8 @@ class PengajuanMagangAdminResource extends JsonResource
                 'departemen'      => Departemen::nama($this->user->departemen),
                 'departemen_kode' => $this->user->departemen,
             ],
-            // Kolom anggota sudah memuat ketua; data lama yang masih kosong dihitung 1 (ketua saja).
-            'jumlah_mahasiswa' => max(count($this->anggota ?? []), 1),
+            // Ketua + anggota tambahan (ketua dihitung dari akun, bukan dari snapshot lama).
+            'jumlah_mahasiswa' => $this->jumlahMahasiswa(),
 
             'instansi'        => $this->instansi,
             'instansi_kedua'  => $this->instansi_kedua,
