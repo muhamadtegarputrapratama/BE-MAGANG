@@ -119,7 +119,12 @@ class PengajuanMagangService
         $pengajuan->loadMissing('user');
         $user = $pengajuan->user;
 
-        return DB::transaction(function () use ($pengajuan, $user, $data): PengajuanMagang {
+        // Simpan identitas ketua SEBELUM data user diubah dan disimpan.
+        // (Setelah $user->save(), getOriginal('nim') sudah berisi NIM baru.)
+        $nimLamaKetua = strtoupper(trim((string) $user->nim));
+        $idKetua = (int) $user->id;
+
+        return DB::transaction(function () use ($pengajuan, $user, $data, $nimLamaKetua, $idKetua): PengajuanMagang {
             $fileLama = [];
             $userDiubah = false;
 
@@ -187,18 +192,25 @@ class PengajuanMagangService
                 $nimKetua = strtoupper((string) $user->nim);
                 $anggotaTambahan = array_values(array_filter(
                     (array) ($data['anggota'] ?? []),
-                    function ($member) use ($nimKetua): bool {
-                        return strtoupper(trim((string) ($member['nim'] ?? ''))) !== $nimKetua;
+                    function ($member) use ($nimKetua, $nimLamaKetua): bool {
+                        $nim = strtoupper(trim((string) ($member['nim'] ?? '')));
+
+                        // Buang entri ketua (NIM baru maupun NIM lama) dari daftar anggota tambahan.
+                        return $nim !== $nimKetua && $nim !== $nimLamaKetua;
                     }
                 ));
 
                 $pengajuan->anggota = $this->susunAnggota($user, $anggotaTambahan);
             } elseif ($userDiubah && ! empty($pengajuan->anggota)) {
-                $nimLamaKetua = strtoupper((string) ($user->getOriginal('nim') ?? $user->nim));
+                // Buang entri ketua yang lama (cocok lewat user_id atau NIM lama),
+                // lalu susun ulang dengan data ketua yang baru.
                 $anggotaLama = array_values(array_filter(
                     $pengajuan->anggota,
-                    function ($member) use ($nimLamaKetua): bool {
-                        return strtoupper(trim((string) ($member['nim'] ?? ''))) !== $nimLamaKetua;
+                    function ($member) use ($nimLamaKetua, $idKetua): bool {
+                        $nim = strtoupper(trim((string) ($member['nim'] ?? '')));
+
+                        return (int) ($member['user_id'] ?? 0) !== $idKetua
+                            && $nim !== $nimLamaKetua;
                     }
                 ));
 
