@@ -30,9 +30,10 @@ class PengajuanMagangAdminResource extends JsonResource
             ],
 
             'mahasiswa' => [
-                // SESUAIKAN dengan nama kolom di tabel users milik temanmu
                 'nama'            => $this->user->name,
                 'nim'             => $this->user->nim,
+                'email'           => $this->user->email,
+                'no_wa'           => $this->user->no_wa,
                 'departemen'      => Departemen::nama($this->user->departemen),
                 'departemen_kode' => $this->user->departemen,
             ],
