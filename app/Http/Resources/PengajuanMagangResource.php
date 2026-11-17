@@ -13,7 +13,6 @@ class PengajuanMagangResource extends JsonResource
     {
         $this->resource->loadMissing('user');
 
-        $setuju = $this->status === StatusPengajuan::Setuju;
         $kodeDepartemen = $this->user?->departemen;
 
         return [
@@ -63,13 +62,9 @@ class PengajuanMagangResource extends JsonResource
             'ditandatangani_at'    => $this->ditandatangani_at?->toIso8601String(),
             'dikirim_at'           => $this->dikirim_at?->toIso8601String(),
             'berkas' => [
-                'bukti_spp'          => $this->file_bukti_spp !== null,
-                'surat_rekomendasi'  => $this->file_surat_rekomendasi !== null,
-                'surat_magang'       => $this->file_surat_magang !== null,
-                'surat_magang_kedua' => $this->file_surat_magang_kedua !== null,
+                'bukti_spp'         => $this->file_bukti_spp !== null,
+                'surat_rekomendasi' => $this->file_surat_rekomendasi !== null,
             ],
-            'surat_magang_tersedia'       => $setuju && ! empty($this->file_surat_magang),
-            'surat_magang_kedua_tersedia' => $setuju && ! empty($this->file_surat_magang_kedua),
             'diverifikasi_at' => $this->diverifikasi_at?->toIso8601String(),
             'dibuat_pada'     => $this->created_at->toIso8601String(),
         ];

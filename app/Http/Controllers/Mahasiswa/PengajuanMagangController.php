@@ -10,7 +10,6 @@ use App\Http\Resources\PengajuanMagangMahasiswaResource;
 use App\Models\PengajuanMagang;
 use App\Services\PengajuanMagangService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class PengajuanMagangController extends Controller
@@ -77,36 +76,6 @@ class PengajuanMagangController extends Controller
             'Content-Type'        => 'application/pdf',
             'Content-Disposition' => 'inline; filename="surat-pengajuan-' . $urutan . '.pdf"',
         ]);
-    }
-
-    /**
-     * Menampilkan atau mengunduh Surat Pengantar Magang yang sudah disetujui admin.
-     * Instansi kedua: tambahkan ?urutan=2 (default 1).
-     */
-    public function suratMagang(Request $request, PengajuanMagang $pengajuan)
-    {
-        $this->pastikanPemilik($request, $pengajuan);
-
-        $urutan = $this->urutan($request, $pengajuan);
-        $file   = $pengajuan->fileSuratMagang($urutan);
-
-        abort_unless(
-            $pengajuan->status === StatusPengajuan::Setuju && $file,
-            404,
-            'Surat pengantar magang belum tersedia atau pengajuan belum disetujui.'
-        );
-
-        $disk = Storage::disk('local');
-        abort_unless($disk->exists($file), 404, 'File surat pengantar magang tidak ditemukan.');
-
-        $mode = $request->query('mode', 'preview');
-        $namaFile = "surat-pengantar-magang-{$pengajuan->id}"
-            . ($urutan > 1 ? "-{$urutan}" : '')
-            . '.pdf';
-
-        return $mode === 'download'
-            ? $disk->download($file, $namaFile)
-            : $disk->response($file, $namaFile);
     }
 
     public function tandaTangan(Request $request, PengajuanMagang $pengajuan)

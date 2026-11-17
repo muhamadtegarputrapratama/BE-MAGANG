@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\URL;
 /**
  * Sama seperti PengajuanMagangResource, ditambah daftar berkas (dengan link bertanda tangan)
  * supaya mahasiswa bisa melihat berkas yang sudah mereka kirim.
+ *
+ * Surat pengantar magang resmi (yang diterbitkan admin setelah disetujui) sengaja TIDAK
+ * disertakan: surat itu hanya untuk admin dan tidak ditampilkan ke mahasiswa.
  */
 class PengajuanMagangMahasiswaResource extends PengajuanMagangResource
 {
@@ -36,8 +39,6 @@ class PengajuanMagangMahasiswaResource extends PengajuanMagangResource
             'surat-pengajuan-kedua' => ['label' => 'Surat Pengajuan (Instansi 2)',                     'path' => $this->file_surat_pengajuan_kedua],
             'bukti-spp'             => ['label' => 'Bukti Pembayaran SPP',                             'path' => $this->file_bukti_spp],
             'surat-rekomendasi'     => ['label' => 'Surat Rekomendasi',                                'path' => $this->file_surat_rekomendasi],
-            'surat-magang'          => ['label' => 'Surat Pengantar Magang' . ($dua ? ' (Instansi 1)' : ''), 'path' => $this->file_surat_magang],
-            'surat-magang-kedua'    => ['label' => 'Surat Pengantar Magang (Instansi 2)',              'path' => $this->file_surat_magang_kedua],
         ];
 
         $hasil = [];

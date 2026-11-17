@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\PengajuanMagang;
 use App\Support\Departemen;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -10,8 +11,24 @@ class PengajuanMagangAdminResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // Pada daftar, jumlahnya sudah dihitung satu kali per halaman oleh controller;
+        // pada detail, dihitung di sini.
+        $atribut = $this->resource->getAttributes();
+        $jumlahPengajuan = array_key_exists('jumlah_pengajuan_mahasiswa', $atribut)
+            ? (int) $atribut['jumlah_pengajuan_mahasiswa']
+            : $this->resource->jumlahPengajuanMahasiswa();
+        $ambang = PengajuanMagang::ambangPeringatan();
+
         return [
             'id' => $this->id,
+
+            // Peringatan untuk admin: mahasiswa yang sama (NIM sama) sudah mengajukan 2 kali atau lebih.
+            'pengajuan_mahasiswa' => [
+                'jumlah'           => $jumlahPengajuan,
+                'ambang'           => $ambang,
+                'perlu_peringatan' => $jumlahPengajuan >= $ambang,
+            ],
+
             'mahasiswa' => [
                 // SESUAIKAN dengan nama kolom di tabel users milik temanmu
                 'nama'            => $this->user->name,

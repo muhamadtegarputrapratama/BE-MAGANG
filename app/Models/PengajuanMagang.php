@@ -62,6 +62,36 @@ class PengajuanMagang extends Model
     }
 
     /* =========================================================
+       PERINGATAN PENGAJUAN BERULANG (hanya peringatan untuk admin, tidak memblokir mahasiswa)
+    ========================================================= */
+
+    /**
+     * Admin diberi peringatan bila mahasiswa (akun / NIM yang sama) sudah mengajukan sebanyak ini.
+     * Bisa diubah di config/magang.php: 'ambang_peringatan_pengajuan'.
+     */
+    public static function ambangPeringatan(): int
+    {
+        return max((int) config('magang.ambang_peringatan_pengajuan', 2), 1);
+    }
+
+    /**
+     * Banyaknya pengajuan yang sudah dikirim oleh seorang mahasiswa (draft tidak dihitung).
+     * Revisi tetap dihitung satu: memperbaiki pengajuan tidak membuat pengajuan baru.
+     */
+    public static function jumlahTerkirimUser(int $userId): int
+    {
+        return static::where('user_id', $userId)
+            ->where('status', '!=', StatusPengajuan::Draft->value)
+            ->count();
+    }
+
+    /** Banyaknya pengajuan terkirim milik mahasiswa pengaju ini (termasuk pengajuan ini). */
+    public function jumlahPengajuanMahasiswa(): int
+    {
+        return static::jumlahTerkirimUser((int) $this->user_id);
+    }
+
+    /* =========================================================
        INSTANSI (maksimal 2) -> satu instansi = satu surat
     ========================================================= */
 
