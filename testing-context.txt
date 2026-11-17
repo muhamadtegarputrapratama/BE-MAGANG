@@ -1,0 +1,3952 @@
+
+
+========== routes\api.php ==========
+
+<?php
+
+use App\Http\Controllers\Admin\BerkasPengajuanController;
+use App\Http\Controllers\Admin\PengajuanMagangController as AdminPengajuanController;
+use App\Http\Controllers\Admin\SuratWhatsAppController; // BARU
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Mahasiswa\PengajuanMagangController as MahasiswaPengajuanController;
+use App\Http\Controllers\UnduhSuratMagangController; // BARU
+use App\Http\Controllers\VerifikasiSuratController;
+use Illuminate\Support\Facades\Route;
+
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:10,1');
+Route::post('/login', [AuthController::class, 'login'])->name('login')->middleware('throttle:5,1');
+
+// Verifikasi surat lewat QR
+Route::get('/verifikasi/{kode}', [VerifikasiSuratController::class, 'show'])
+    ->where('kode', '[A-Za-z0-9]{32}')
+    ->middleware('throttle:30,1');
+
+// Preview/download file (admin dan pemilik pengajuan). Dilindungi signed URL,
+// tanpa token, supaya bisa dipakai di <iframe>/<img>.
+Route::get('/admin/pengajuan/{pengajuan}/berkas/{jenis}', [BerkasPengajuanController::class, 'tampil'])
+    ->name('admin.pengajuan.berkas')
+    ->middleware('signed');
+
+// BARU: unduh surat magang oleh mahasiswa lewat link WhatsApp. Tanpa token, hanya signed URL + masa berlaku.
+Route::get('/surat-magang/{pengajuan}/{urutan}/unduh', UnduhSuratMagangController::class)
+    ->name('surat-magang.unduh')
+    ->whereNumber('pengajuan')
+    ->whereIn('urutan', ['1', '2'])
+    ->middleware(['throttle:20,1', 'signed']);
+
+Route::middleware('auth:sanctum')->group(function () {
+
+    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+
+    // ----- Mahasiswa -----
+    Route::middleware('role:mahasiswa')
+        ->prefix('pengajuan-magang')
+        ->group(function () {
+            Route::get('/', [MahasiswaPengajuanController::class, 'index']);
+            Route::post('/', [MahasiswaPengajuanController::class, 'store']);
+            Route::get('/{pengajuan}', [MahasiswaPengajuanController::class, 'show']);
+            Route::put('/{pengajuan}', [MahasiswaPengajuanController::class, 'update']);
+            Route::get('/{pengajuan}/preview-surat', [MahasiswaPengajuanController::class, 'preview']);
+            Route::get('/{pengajuan}/surat-magang', [MahasiswaPengajuanController::class, 'suratMagang']);
+            Route::post('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'tandaTangan']);
+            Route::delete('/{pengajuan}/tanda-tangan', [MahasiswaPengajuanController::class, 'batalTandaTangan']);
+            Route::post('/{pengajuan}/kirim', [MahasiswaPengajuanController::class, 'kirim']);
+        });
+
+    // ----- Admin KPAP -----
+    Route::middleware('role:admin_kpap')
+        ->prefix('admin/pengajuan-magang')
+        ->group(function () {
+            Route::get('/', [AdminPengajuanController::class, 'index']);
+
+            Route::get('/ringkasan', [AdminPengajuanController::class, 'ringkasan']);
+
+            Route::get('/{pengajuan}', [AdminPengajuanController::class, 'show']);
+
+            // Edit data pengajuan
+            Route::patch('/{pengajuan}', [AdminPengajuanController::class, 'update']);
+
+            // Ubah status pengajuan
+            Route::patch('/{pengajuan}/status', [AdminPengajuanController::class, 'ubahStatus']);
+
+            // BARU: buat link unduh sementara + URL WhatsApp untuk surat instansi ke-1 / ke-2
+            Route::post('/{pengajuan}/surat-magang/{urutan}/whatsapp', [SuratWhatsAppController::class, 'buat'])
+                ->whereIn('urutan', ['1', '2']);
+        });
+});
+
+
+========== D:\form-magang-backend\app\Models\PengajuanMagang.php ==========
+
+<?php
+
+namespace App\Models;
+
+use App\Enums\StatusPengajuan;
+use App\Support\Departemen;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PengajuanMagang extends Model
+{
+    protected $table = 'pengajuan_magang';
+
+    // Nomor surat dan path file sengaja tidak di sini: diisi sistem, bukan lewat mass assignment.
+    protected $fillable = [
+        'nama',
+        'anggota',
+        'instansi',
+        'alamat_instansi',
+        'tanggal_mulai',
+        'tanggal_selesai',
+        'instansi_kedua',
+        'alamat_instansi_kedua',
+        'tanggal_mulai_kedua',
+        'tanggal_selesai_kedua',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'status' => StatusPengajuan::class,
+            'anggota' => 'array',
+            'tanggal_mulai' => 'date',
+            'tanggal_selesai' => 'date',
+            'tanggal_mulai_kedua' => 'date',
+            'tanggal_selesai_kedua' => 'date',
+            'diverifikasi_at' => 'datetime',
+            'ditandatangani_at' => 'datetime',
+            'dikirim_at' => 'datetime',
+        ];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function diverifikasiOleh(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'diverifikasi_oleh');
+    }
+
+    public function sudahDitandatangani(): bool
+    {
+        return $this->ditandatangani_at !== null;
+    }
+
+    /** Mahasiswa hanya boleh mengubah saat draft atau diminta revisi. */
+    public function bisaDiedit(): bool
+    {
+        return in_array($this->status, [StatusPengajuan::Draft, StatusPengajuan::Revisi], true);
+    }
+
+    /* =========================================================
+       PERINGATAN PENGAJUAN BERULANG (hanya peringatan untuk admin, tidak memblokir mahasiswa)
+    ========================================================= */
+
+    /**
+     * Admin diberi peringatan bila mahasiswa (akun / NIM yang sama) sudah mengajukan sebanyak ini.
+     * Bisa diubah di config/magang.php: 'ambang_peringatan_pengajuan'.
+     */
+    public static function ambangPeringatan(): int
+    {
+        return max((int) config('magang.ambang_peringatan_pengajuan', 2), 1);
+    }
+
+    /**
+     * Banyaknya pengajuan yang sudah dikirim oleh seorang mahasiswa (draft tidak dihitung).
+     * Revisi tetap dihitung satu: memperbaiki pengajuan tidak membuat pengajuan baru.
+     */
+    public static function jumlahTerkirimUser(int $userId): int
+    {
+        return static::where('user_id', $userId)
+            ->where('status', '!=', StatusPengajuan::Draft->value)
+            ->count();
+    }
+
+    /** Banyaknya pengajuan terkirim milik mahasiswa pengaju ini (termasuk pengajuan ini). */
+    public function jumlahPengajuanMahasiswa(): int
+    {
+        return static::jumlahTerkirimUser((int) $this->user_id);
+    }
+
+    /* =========================================================
+       INSTANSI (maksimal 2) -> satu instansi = satu surat
+    ========================================================= */
+
+    /** 1 bila hanya instansi pertama, 2 bila instansi kedua juga diisi. */
+    public function jumlahInstansi(): int
+    {
+        return filled($this->instansi_kedua) ? 2 : 1;
+    }
+
+    /** Instansi tujuan berurutan; 'urutan' 1 atau 2 menentukan surat yang mana. */
+    public function daftarInstansi(): array
+    {
+        $daftar = [[
+            'urutan'  => 1,
+            'nama'    => $this->instansi,
+            'alamat'  => $this->alamat_instansi,
+            'mulai'   => $this->tanggal_mulai,
+            'selesai' => $this->tanggal_selesai,
+            'nomor'   => $this->nomor_surat,
+        ]];
+
+        if ($this->jumlahInstansi() === 2) {
+            $daftar[] = [
+                'urutan'  => 2,
+                'nama'    => $this->instansi_kedua,
+                'alamat'  => $this->alamat_instansi_kedua,
+                'mulai'   => $this->tanggal_mulai_kedua,
+                'selesai' => $this->tanggal_selesai_kedua,
+                'nomor'   => $this->nomor_surat_kedua,
+            ];
+        }
+
+        return $daftar;
+    }
+
+    /** Path PDF form pengajuan (yang ditandatangani mahasiswa) untuk instansi ke-$urutan. */
+    public function fileSuratPengajuan(int $urutan = 1): ?string
+    {
+        return match ($urutan) {
+            1       => $this->file_surat_pengajuan,
+            2       => $this->file_surat_pengajuan_kedua,
+            default => null,
+        };
+    }
+
+    /** Path PDF surat pengantar magang untuk instansi ke-$urutan. */
+    public function fileSuratMagang(int $urutan = 1): ?string
+    {
+        return match ($urutan) {
+            1       => $this->file_surat_magang,
+            2       => $this->file_surat_magang_kedua,
+            default => null,
+        };
+    }
+
+    /* =========================================================
+       MAHASISWA: ketua selalu dari akun (users), anggota dari kolom "anggota"
+    ========================================================= */
+
+    /**
+     * Anggota kelompok SELAIN ketua.
+     *
+     * Ketua tidak diambil dari kolom "anggota", melainkan selalu dari akun (users),
+     * supaya nama / NIM ketua tidak pernah usang atau dobel setelah diubah admin.
+     * Entri ketua di kolom "anggota" (snapshot lama) dikenali dari "user_id" yang terisi
+     * atau NIM yang sama dengan ketua, lalu dilewati. NIM kembar juga dilewati.
+     *
+     * @return array<int, array{nama: string, nim: string, departemen: ?string}>
+     */
+    public function anggotaTambahan(): array
+    {
+        $this->loadMissing('user');
+
+        $terpakai = [strtoupper(trim((string) $this->user?->nim)) => true];
+        $hasil = [];
+
+        foreach ($this->anggota ?? [] as $a) {
+            $nim = strtoupper(trim((string) ($a['nim'] ?? '')));
+
+            if ($nim === '' || ! empty($a['user_id']) || isset($terpakai[$nim])) {
+                continue;
+            }
+
+            $terpakai[$nim] = true;
+
+            $hasil[] = [
+                'nama'       => (string) ($a['nama'] ?? ''),
+                'nim'        => $nim,
+                'departemen' => $a['departemen'] ?? null, // kode departemen
+            ];
+        }
+
+        return $hasil;
+    }
+
+    /** Jumlah mahasiswa dalam pengajuan, termasuk ketua. */
+    public function jumlahMahasiswa(): int
+    {
+        return 1 + count($this->anggotaTambahan());
+    }
+
+    /**
+     * Daftar mahasiswa yang dicetak di surat: pengaju (ketua) selalu nomor 1 dengan data
+     * terbaru dari akun, lalu anggota tambahan. Departemen diubah dari kode menjadi nama.
+     * Total maksimal config('magang.maks_anggota').
+     */
+    public function daftarAnggotaCetak(): array
+    {
+        $this->loadMissing('user');
+        $user = $this->user;
+
+        $daftar = [[
+            'nama'       => $user->name,
+            'nim'        => $user->nim,
+            'departemen' => Departemen::nama($user->departemen),
+        ]];
+
+        foreach ($this->anggotaTambahan() as $a) {
+            $daftar[] = [
+                'nama'       => $a['nama'],
+                'nim'        => $a['nim'],
+                'departemen' => Departemen::nama($a['departemen']),
+            ];
+        }
+
+        return array_slice($daftar, 0, (int) config('magang.maks_anggota', 10));
+    }
+}
+
+
+========== D:\form-magang-backend\app\Models\User.php ==========
+
+<?php
+
+namespace App\Models;
+
+// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+use Spatie\Permission\Traits\HasRoles;
+
+#[Fillable(['name', 'email', 'password', 'nim', 'departemen', 'role', 'no_wa'])]
+#[Hidden(['password', 'remember_token'])]
+class User extends Authenticatable
+{
+    /** @use HasFactory<UserFactory> */
+    use HasFactory, Notifiable, HasApiTokens, HasRoles;
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'email_verified_at' => 'datetime',
+            'password' => 'hashed',
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\Controller.php ==========
+
+<?php
+
+namespace App\Http\Controllers;
+
+abstract class Controller
+{
+    //
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\UnduhSuratMagangController.php ==========
+
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Enums\StatusPengajuan;
+use App\Models\PengajuanMagang;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+
+class UnduhSuratMagangController extends Controller
+{
+    public function __invoke(int $pengajuan, int $urutan)
+    {
+        $p = PengajuanMagang::find($pengajuan);
+
+        abort_if(
+            $p === null
+            || $p->status !== StatusPengajuan::Setuju
+            || $urutan < 1
+            || $urutan > $p->jumlahInstansi(),
+            404,
+            'Surat tidak tersedia.'
+        );
+
+        $path = $p->fileSuratMagang($urutan);
+
+        abort_if(blank($path), 404, 'Surat tidak tersedia.');
+
+        // Hanya disk privat. Folder storage tidak pernah dibuka ke publik.
+        $disk = Storage::disk('local');
+
+        abort_unless($disk->exists($path), 404, 'Surat tidak tersedia.');
+
+        $namaInstansi = $urutan === 2 ? $p->instansi_kedua : $p->instansi;
+        $slug = Str::limit(Str::slug((string) $namaInstansi), 60, '');
+        $namaFile = "surat-magang-{$urutan}" . ($slug !== '' ? "-{$slug}" : '') . '.pdf';
+
+        return $disk->download($path, $namaFile, [
+            'Content-Type'           => 'application/pdf',
+            'Cache-Control'          => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+            'X-Robots-Tag'           => 'noindex, nofollow',
+        ]);
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\VerifikasiSuratController.php ==========
+
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\PengajuanMagang;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use App\Support\Departemen;
+
+class VerifikasiSuratController extends Controller
+{
+    /**
+     * Dituju oleh QR. Menampilkan PDF surat pengajuan itu sendiri. Publik, tanpa login.
+     * Surat instansi kedua memakai ?urutan=2 (QR-nya sudah membawa parameter itu).
+     */
+    public function surat(Request $request, string $kode)
+    {
+        $pengajuan = PengajuanMagang::where('kode_verifikasi', $kode)
+            ->whereNotNull('ditandatangani_at')
+            ->first();
+
+        $file = $pengajuan?->fileSuratPengajuan((int) $request->query('urutan', 1));
+
+        abort_if(
+            ! $pengajuan || ! $file,
+            404,
+            'Surat tidak ditemukan atau tanda tangan sudah dibatalkan.'
+        );
+
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+
+        abort_if(! $disk->exists($file), 404, 'File surat tidak ditemukan.');
+
+        // tampil langsung di browser (inline)
+        return $disk->response($file, 'surat-pengajuan.pdf', [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
+    /** Versi data (JSON) untuk kebutuhan aplikasi, datanya sengaja minimal. */
+    public function show(Request $request, string $kode)
+    {
+        $pengajuan = PengajuanMagang::with('user')
+            ->where('kode_verifikasi', $kode)
+            ->whereNotNull('ditandatangani_at')
+            ->first();
+
+        $urutan   = (int) $request->query('urutan', 1);
+        $instansi = $pengajuan?->daftarInstansi()[$urutan - 1] ?? null;
+
+        if (! $pengajuan || ! $instansi) {
+            return response()->json([
+                'valid'   => false,
+                'message' => 'Surat tidak ditemukan atau tidak valid.',
+            ], 404);
+        }
+
+        return response()->json([
+            'valid' => true,
+            'data'  => [
+                'nama'       => $pengajuan->user?->name ?? $pengajuan->nama,
+                'nim'        => $pengajuan->user?->nim,
+                'departemen' => Departemen::nama($pengajuan->user?->departemen),
+                'instansi'               => $instansi['nama'],
+                'tanggal_ditandatangani' => $pengajuan->ditandatangani_at?->toDateString(),
+                'status'                 => $pengajuan->status?->label(),
+            ],
+        ]);
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\Admin\BerkasPengajuanController.php ==========
+
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Enums\StatusPengajuan;
+use App\Http\Controllers\Controller;
+use App\Models\PengajuanMagang;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+
+class BerkasPengajuanController extends Controller
+{
+    /** jenis di URL => kolom di tabel */
+    private const BERKAS = [
+        'surat-pengajuan'        => 'file_surat_pengajuan',
+        'surat-pengajuan-kedua'  => 'file_surat_pengajuan_kedua',
+        'bukti-spp'              => 'file_bukti_spp',
+        'surat-rekomendasi'      => 'file_surat_rekomendasi',
+        'surat-magang'           => 'file_surat_magang',
+        'surat-magang-kedua'     => 'file_surat_magang_kedua',
+    ];
+
+    private const ALIAS = [
+        'spp'         => 'bukti-spp',
+        'rekomendasi' => 'surat-rekomendasi',
+    ];
+
+    /** Berkas yang boleh dibuka walau pengajuan masih draft (surat yang sudah ditandatangani). */
+    private const BOLEH_SAAT_DRAFT = ['surat-pengajuan', 'surat-pengajuan-kedua'];
+
+    public function tampil(Request $request, PengajuanMagang $pengajuan, string $jenis)
+    {
+        $mode = $request->query('mode', 'preview');
+
+        // Kompatibel dengan link bentuk lama: /berkas/download?nama=surat-magang
+        if (in_array($jenis, ['preview', 'download'], true)) {
+            $mode  = $jenis;
+            $jenis = (string) $request->query('nama', $request->query('jenis', ''));
+        }
+
+        $jenis = self::ALIAS[$jenis] ?? $jenis;
+
+        abort_unless(isset(self::BERKAS[$jenis]), 404, "Jenis berkas tidak dikenal: {$jenis}");
+        abort_if(
+            $pengajuan->status === StatusPengajuan::Draft && ! in_array($jenis, self::BOLEH_SAAT_DRAFT, true),
+            404,
+            'Pengajuan belum dikirim.'
+        );
+
+        $path = $pengajuan->{self::BERKAS[$jenis]};
+
+        abort_if(! $path, 404, 'Berkas belum tersedia.');
+
+        $lokasi = $this->cariFile($path);
+
+        abort_if(! $lokasi, 404, "File tidak ditemukan di penyimpanan: {$path}");
+
+        [$disk, $pathAsli] = $lokasi;
+
+        $ekstensi = pathinfo($pathAsli, PATHINFO_EXTENSION);
+        $nama     = "{$jenis}-{$pengajuan->id}.{$ekstensi}";
+
+        return $mode === 'download'
+            ? $disk->download($pathAsli, $nama)
+            : $disk->response($pathAsli, $nama);   // tampil langsung di browser (inline)
+    }
+
+    /**
+     * Mencari file di disk privat dulu, lalu disk public (untuk data lama).
+     * Awalan "public/" atau "storage/" pada path lama ikut dicoba tanpa awalan itu.
+     *
+     * @return array{0: FilesystemAdapter, 1: string}|null
+     */
+    private function cariFile(string $path): ?array
+    {
+        $kandidat = array_values(array_unique([
+            $path,
+            ltrim((string) preg_replace('#^(public/|storage/)#', '', $path), '/'),
+        ]));
+
+        foreach (['local', 'public'] as $namaDisk) {
+            /** @var FilesystemAdapter $disk */
+            $disk = Storage::disk($namaDisk);
+
+            foreach ($kandidat as $p) {
+                if ($disk->exists($p)) {
+                    return [$disk, $p];
+                }
+            }
+        }
+
+        return null;
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\Admin\PengajuanMagangController.php ==========
+
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Enums\StatusPengajuan;
+use App\Http\Controllers\Controller;
+use App\Http\Requests\UbahStatusPengajuanRequest;
+use App\Http\Requests\Admin\UpdatePengajuanMagangRequest;
+use App\Http\Resources\PengajuanMagangAdminDetailResource;
+use App\Http\Resources\PengajuanMagangAdminResource;
+use App\Models\PengajuanMagang;
+use App\Models\User;
+use App\Services\PengajuanMagangService;
+use App\Services\VerifikasiPengajuanService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use App\Support\Departemen;
+
+class PengajuanMagangController extends Controller
+{
+    public function __construct(
+        private VerifikasiPengajuanService $verifikasi,
+        private PengajuanMagangService $pengajuanService
+    ) {}
+
+    /**
+     * Halaman tabel: pengajuan yang sudah dikirim (tanpa draft), 20 per halaman.
+     * Urutan: nomor surat naik (1, 2, 3, ...), yang belum bernomor di bawah.
+     */
+    public function index(Request $request)
+    {
+        $filter = $request->validate([
+            'status'     => ['nullable', Rule::in(['menunggu_verifikasi', 'setuju', 'revisi'])],
+            'q'          => ['nullable', 'string', 'max:100'],
+            'departemen' => ['nullable', 'string', 'max:100'],
+            'per_page'   => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $daftar = $this->urutkanNomorSurat($this->kueri($filter)->with('user'))
+            ->paginate($filter['per_page'] ?? 20)
+            ->withQueryString();
+
+        return PengajuanMagangAdminResource::collection($daftar);
+    }
+
+    /**
+     * Jumlah per status (mengikuti pencarian dan departemen yang aktif)
+     * dan daftar departemen untuk dropdown.
+     */
+    public function ringkasan(Request $request)
+    {
+        $filter = $request->validate([
+            'q'          => ['nullable', 'string', 'max:100'],
+            'departemen' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $hitung = $this->kueri($filter, denganStatus: false)
+            ->selectRaw('status, count(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
+        // SESUAIKAN nama kolom departemen di tabel users
+        $departemen = User::whereIn(
+            'id',
+            PengajuanMagang::where('status', '!=', StatusPengajuan::Draft->value)->select('user_id')
+        )
+            ->whereNotNull('departemen')
+            ->distinct()
+            ->pluck('departemen')
+            ->map(fn($kode) => ['kode' => $kode, 'nama' => Departemen::nama($kode)])
+            ->sortBy('nama')
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'menunggu_verifikasi' => (int) ($hitung['menunggu_verifikasi'] ?? 0),
+                'setuju'              => (int) ($hitung['setuju'] ?? 0),
+                'revisi'              => (int) ($hitung['revisi'] ?? 0),
+                'departemen'          => $departemen,
+            ],
+        ]);
+    }
+
+    /** Tombol "Detail": data lengkap dan daftar berkas. */
+    public function show(PengajuanMagang $pengajuan)
+    {
+        abort_if($pengajuan->status === StatusPengajuan::Draft, 404);
+
+        return new PengajuanMagangAdminDetailResource($pengajuan->load('user'));
+    }
+
+    /**
+     * Admin mengedit data pengajuan magang (termasuk data mahasiswa pengaju,
+     * anggota kelompok, instansi 1, dan instansi 2).
+     */
+    public function update(
+        UpdatePengajuanMagangRequest $request,
+        PengajuanMagang $pengajuan
+    ) {
+        // Draft tidak bisa diedit melalui halaman admin.
+        abort_if(
+            $pengajuan->status === StatusPengajuan::Draft,
+            404
+        );
+
+        // Pengajuan yang sudah disetujui tidak boleh diedit
+        // karena surat dan tanda tangan mungkin sudah diterbitkan.
+        abort_if(
+            !in_array(
+                $pengajuan->status->value,
+                ['menunggu_verifikasi', 'revisi'],
+                true
+            ),
+            403,
+            'Pengajuan yang sudah disetujui tidak dapat diedit.'
+        );
+
+        $pengajuan = $this->pengajuanService->perbaruiOlehAdmin(
+            $pengajuan,
+            $request->validated()
+        );
+
+        return (new PengajuanMagangAdminDetailResource(
+            $pengajuan->load('user')
+        ))->additional([
+            'message' => 'Data pengajuan magang berhasil diperbarui.',
+        ]);
+    }
+
+    /** Admin memutuskan: setuju atau revisi (catatan wajib saat revisi). */
+    public function ubahStatus(UbahStatusPengajuanRequest $request, PengajuanMagang $pengajuan)
+    {
+        abort_if($pengajuan->status === StatusPengajuan::Draft, 404);
+
+        if ($request->validated('status') === 'setuju') {
+            $pengajuan = $this->verifikasi->setujui($pengajuan, $request->user());
+            $pesan = $pengajuan->jumlahInstansi() === 2
+                ? 'Pengajuan disetujui dan 2 surat pengantar magang telah dibuat.'
+                : 'Pengajuan disetujui dan surat pengantar magang telah dibuat.';
+        } else {
+            $pengajuan = $this->verifikasi->mintaRevisi(
+                $pengajuan,
+                $request->user(),
+                $request->validated('catatan'),
+            );
+            $pesan = 'Pengajuan dikembalikan ke mahasiswa untuk direvisi.';
+        }
+
+        return (new PengajuanMagangAdminDetailResource($pengajuan->load('user')))
+            ->additional(['message' => $pesan]);
+    }
+
+    /**
+     * Urutkan berdasarkan tahun surat (descending) lalu angka urut di depan nomor surat.
+     * Format: "8/IT3.F4/PK.01.06/2026" -> urut=8, tahun=2026.
+     * Angka dibaca numerik supaya 10 tidak muncul sebelum 2.
+     * Pengajuan tanpa nomor surat ditaruh paling bawah, urut berdasarkan id.
+     */
+    private function urutkanNomorSurat($query)
+    {
+        $angka = match (DB::connection()->getDriverName()) {
+            'pgsql'  => "CAST(split_part(nomor_surat, '/', 1) AS INTEGER)",
+            'sqlite' => "CAST(substr(nomor_surat, 1, instr(nomor_surat, '/') - 1) AS INTEGER)",
+            default  => "CAST(SUBSTRING_INDEX(nomor_surat, '/', 1) AS UNSIGNED)", // MySQL / MariaDB
+        };
+
+        $tahun = match (DB::connection()->getDriverName()) {
+            'pgsql'  => "CAST(split_part(nomor_surat, '/', 4) AS INTEGER)",
+            'sqlite' => "CAST(substr(nomor_surat, -4) AS INTEGER)", // 4 digit tahun di akhir nomor surat
+            default  => "CAST(SUBSTRING_INDEX(nomor_surat, '/', -1) AS UNSIGNED)", // MySQL / MariaDB
+        };
+
+        return $query
+            ->orderByRaw("CASE WHEN nomor_surat IS NULL OR nomor_surat = '' THEN 1 ELSE 0 END")
+            ->orderByRaw("{$tahun} DESC")
+            ->orderByRaw("{$angka} ASC")
+            ->orderBy('id');
+    }
+
+    /** Kueri dasar yang dipakai daftar dan ringkasan, supaya hasilnya selalu sejalan. */
+    private function kueri(array $filter, bool $denganStatus = true)
+    {
+        return PengajuanMagang::query()
+            ->where('status', '!=', StatusPengajuan::Draft->value)
+            ->when(
+                $denganStatus ? ($filter['status'] ?? null) : null,
+                fn($query, $status) => $query->where('status', $status)
+            )
+            ->when(
+                $filter['departemen'] ?? null,
+                // SESUAIKAN nama kolom departemen di tabel users
+                fn($query, $dep) => $query->whereHas('user', fn($user) => $user->where('departemen', $dep))
+            )
+            ->when($filter['q'] ?? null, function ($query, $kata) {
+                $query->where(function ($query) use ($kata) {
+                    $query->where('instansi', 'like', "%{$kata}%")
+                        ->orWhere('instansi_kedua', 'like', "%{$kata}%")
+                        ->orWhere('nomor_surat', 'like', "%{$kata}%")
+                        ->orWhere('nomor_surat_kedua', 'like', "%{$kata}%")
+                        // SESUAIKAN nama kolom users (name, nim)
+                        ->orWhereHas('user', fn($user) => $user
+                            ->where('name', 'like', "%{$kata}%")
+                            ->orWhere('nim', 'like', "%{$kata}%"));
+                });
+            });
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\Admin\SuratWhatsAppController.php ==========
+
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Http\Controllers\Controller;
+use App\Models\PengajuanMagang;
+use App\Services\SuratWhatsAppService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+
+class SuratWhatsAppController extends Controller
+{
+    public function __construct(private SuratWhatsAppService $layanan) {}
+
+    /** Membuat link unduh sementara dan URL WhatsApp untuk surat magang instansi ke-$urutan. */
+    public function buat(Request $request, PengajuanMagang $pengajuan, int $urutan): JsonResponse
+    {
+        $hasil = $this->layanan->buat($pengajuan, $urutan);
+
+        Log::info('Link surat magang WhatsApp dibuat', [
+            'pengajuan_id'   => $pengajuan->id,
+            'urutan'         => $urutan,
+            'admin_id'       => $request->user()->id,
+            'berlaku_sampai' => $hasil['berlaku_sampai'],
+        ]);
+
+        return response()->json([
+            'message' => 'Link WhatsApp berhasil dibuat. Pesan belum terkirim, kirim secara manual dari WhatsApp.',
+            'data'    => $hasil,
+        ]);
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\Api\AuthController.php ==========
+
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\LoginRequest;
+use App\Http\Requests\RegisterRequest;
+use App\Http\Resources\UserResource;
+use App\Models\User;
+use App\Support\Departemen;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
+use Spatie\Permission\Models\Role;
+use Illuminate\Support\Str;
+
+class AuthController extends Controller
+{
+    /**
+     * Registrasi mahasiswa baru.
+     */
+    public function register(RegisterRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $data['name'] = preg_replace_callback(
+        "/(^|[\s-])([\p{L}])/u",
+        fn ($matches) => $matches[1] . mb_strtoupper($matches[2]),
+        mb_strtolower($data['name'])
+);
+
+        // Departemen ditentukan backend berdasarkan prefix NIM.
+        $departemen = Departemen::dariNim($data['nim']);
+
+        if (! $departemen) {
+            throw ValidationException::withMessages([
+                'nim' => 'Departemen untuk NIM ini tidak dikenali.',
+            ]);
+        }
+
+        $user = DB::transaction(function () use ($data, $departemen) {
+            // Buat akun mahasiswa.
+            $user = User::create([
+                'name' => $data['name'],
+                'nim' => $data['nim'],
+                'departemen' => $departemen['kode'],
+                'email' => $data['email'],
+                'no_wa' => $data['no_wa'],
+                'password' => $data['password'],
+                'role' => 'mahasiswa',
+            ]);
+
+            // Ambil atau buat role mahasiswa dengan guard yang sesuai.
+            $role = Role::findOrCreate('mahasiswa', 'web');
+
+            // Hubungkan role Spatie secara otomatis.
+            $user->assignRole($role);
+
+            return $user;
+        });
+
+        return response()->json([
+            'message' => 'Registrasi berhasil. Silakan login.',
+            'user' => new UserResource($user),
+        ], 201);
+    }
+
+    /**
+     * Login pengguna.
+     */
+    public function login(LoginRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $user = User::where('email', $data['email'])->first();
+
+        // Gunakan pesan yang sama untuk email atau password yang salah.
+        if (
+            ! $user ||
+            ! Hash::check($data['password'], $user->password)
+        ) {
+            return response()->json([
+                'message' => 'Email atau password salah.',
+            ], 401);
+        }
+
+        // Buat token autentikasi Sanctum.
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Login berhasil.',
+            'token' => $token,
+            'token_type' => 'Bearer',
+            'user' => new UserResource($user),
+        ]);
+    }
+
+    /**
+     * Mendapatkan informasi pengguna yang sedang login.
+     */
+    public function me(Request $request): UserResource
+    {
+        return new UserResource($request->user());
+    }
+
+    /**
+     * Logout dan mencabut token yang sedang digunakan.
+     */
+    public function logout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json([
+            'message' => 'Logout berhasil.',
+        ]);
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Controllers\Mahasiswa\PengajuanMagangController.php ==========
+
+<?php
+
+namespace App\Http\Controllers\Mahasiswa;
+
+use App\Enums\StatusPengajuan;
+use App\Http\Controllers\Controller;
+use App\Http\Requests\KirimPengajuanRequest;
+use App\Http\Requests\StorePengajuanMagangRequest;
+use App\Http\Resources\PengajuanMagangMahasiswaResource;
+use App\Models\PengajuanMagang;
+use App\Services\PengajuanMagangService;
+use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+
+class PengajuanMagangController extends Controller
+{
+    public function __construct(private PengajuanMagangService $service) {}
+
+    public function index(Request $request)
+    {
+        $daftar = PengajuanMagang::with('user')
+            ->where('user_id', $request->user()->id)
+            ->latest()
+            ->get();
+
+        return PengajuanMagangMahasiswaResource::collection($daftar);
+    }
+
+    public function store(StorePengajuanMagangRequest $request)
+    {
+        // Satu pengajuan berjalan per mahasiswa: draft diselesaikan/diperbaiki, bukan dibuat ulang.
+        $berjalan = PengajuanMagang::where('user_id', $request->user()->id)
+            ->whereIn('status', [
+                StatusPengajuan::Draft->value,
+                StatusPengajuan::MenungguVerifikasi->value,
+                StatusPengajuan::Revisi->value,
+            ])
+            ->exists();
+
+        if ($berjalan) {
+            throw ValidationException::withMessages([
+                'pengajuan' => 'Kamu masih memiliki pengajuan yang aktif (draft, sedang diproses, atau perlu direvisi). '
+                    . 'Selesaikan atau perbaiki pengajuan tersebut sebelum membuat pengajuan baru.',
+            ]);
+        }
+
+        $pengajuan = $this->service->buatDraft($request->user(), $request->validated());
+
+        return $this->respons($pengajuan, 'Data pengajuan disimpan sebagai draft.', 201);
+    }
+
+    public function show(Request $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        return new PengajuanMagangMahasiswaResource($pengajuan);
+    }
+
+    public function update(StorePengajuanMagangRequest $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        $pengajuan = $this->service->perbarui($pengajuan, $request->validated());
+
+        return $this->respons($pengajuan, 'Data pengajuan diperbarui. Silakan tanda tangan ulang.');
+    }
+
+    /** Preview surat pengajuan. Instansi kedua: tambahkan ?urutan=2 (default 1). */
+    public function preview(Request $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        $urutan = $this->urutan($request, $pengajuan);
+
+        return response($this->service->previewSurat($pengajuan, $urutan), 200, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="surat-pengajuan-' . $urutan . '.pdf"',
+        ]);
+    }
+
+    public function tandaTangan(Request $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        $pengajuan = $this->service->tandaTangani($pengajuan);
+
+        return $this->respons($pengajuan, 'Surat pengajuan berhasil ditandatangani.');
+    }
+
+    public function batalTandaTangan(Request $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        $pengajuan = $this->service->batalkanTandaTangan($pengajuan);
+
+        return $this->respons($pengajuan, 'Tanda tangan dibatalkan.');
+    }
+
+    public function kirim(KirimPengajuanRequest $request, PengajuanMagang $pengajuan)
+    {
+        $this->pastikanPemilik($request, $pengajuan);
+
+        $pengajuan = $this->service->kirim(
+            $pengajuan,
+            $request->file('bukti_spp'),
+            $request->file('surat_rekomendasi'),
+        );
+
+        return $this->respons($pengajuan, 'Pengajuan berhasil dikirim ke admin.');
+    }
+
+    private function pastikanPemilik(Request $request, PengajuanMagang $pengajuan): void
+    {
+        abort_unless(
+            (int) $pengajuan->user_id === (int) $request->user()->id,
+            403
+        );
+    }
+
+    /** Urutan surat dari ?urutan= (1 atau 2). 404 bila instansi tersebut tidak ada. */
+    private function urutan(Request $request, PengajuanMagang $pengajuan): int
+    {
+        $urutan = (int) $request->query('urutan', 1);
+
+        abort_unless(
+            $urutan >= 1 && $urutan <= $pengajuan->jumlahInstansi(),
+            404,
+            'Surat untuk instansi tersebut tidak ada.'
+        );
+
+        return $urutan;
+    }
+
+    private function respons(PengajuanMagang $pengajuan, string $pesan, int $status = 200)
+    {
+        return (new PengajuanMagangMahasiswaResource($pengajuan))
+            ->additional(['message' => $pesan])
+            ->response()
+            ->setStatusCode($status);
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Requests\KirimPengajuanRequest.php ==========
+
+<?php
+
+namespace App\Http\Requests;
+
+use App\Enums\StatusPengajuan;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class KirimPengajuanRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        $pengajuan = $this->route('pengajuan');
+        $user = $this->user();
+
+        // Harus login dan hanya boleh mengirim pengajuan miliknya.
+        if (! $user || ! $pengajuan) {
+            return false;
+        }
+
+        if ((int) $pengajuan->user_id !== (int) $user->id) {
+            return false;
+        }
+
+        // Pengajuan hanya bisa dikirim ketika draft atau revisi.
+        return $pengajuan->bisaDiedit();
+    }
+
+    public function rules(): array
+    {
+        $pengajuan = $this->route('pengajuan');
+
+        return [
+            'bukti_spp' => [
+                Rule::requiredIf(! $pengajuan?->file_bukti_spp),
+                'file',
+                'mimes:pdf,jpg,jpeg,png',
+                'max:2048',
+            ],
+
+            'surat_rekomendasi' => [
+                Rule::requiredIf(! $pengajuan?->file_surat_rekomendasi),
+                'file',
+                'mimes:pdf,jpg,jpeg,png',
+                'max:2048',
+            ],
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'bukti_spp' => 'bukti SPP',
+            'surat_rekomendasi' => 'surat rekomendasi',
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Requests\LoginRequest.php ==========
+
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+class LoginRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $email = $this->input('email');
+
+        $this->merge([
+            'email' => is_string($email) ? strtolower(trim($email)) : $email,
+        ]);
+    }
+
+    public function rules(): array
+    {
+        return [
+            'email' => ['required', 'string', 'email'],
+            'password' => ['required', 'string'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'email.required' => 'Email wajib diisi.',
+            'email.email' => 'Format email tidak valid.',
+            'password.required' => 'Password wajib diisi.',
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Requests\RegisterRequest.php ==========
+
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+class RegisterRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Normalisasi input sebelum divalidasi.
+     */
+    protected function prepareForValidation(): void
+    {
+        $name = $this->input('name');
+        $nim = $this->input('nim');
+        $email = $this->input('email');
+
+        $this->merge([
+            'name' => is_string($name)
+                ? mb_convert_case(trim(preg_replace('/\s+/', ' ', $name)), MB_CASE_TITLE, 'UTF-8')
+                : $name,
+            'nim' => is_string($nim) ? strtoupper(trim($nim)) : $nim,
+            'email' => is_string($email) ? strtolower(trim($email)) : $email,
+        ]);
+    }
+
+    public function rules(): array
+    {
+        return [
+            'name' => ['required', 'string', 'max:255'],
+            'nim' => ['required', 'string', 'regex:/^E(141|241|341|441)[0-9]{7}$/', 'unique:users,nim'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'no_wa' => ['required', 'string', 'regex:/^[0-9]{10,15}$/','unique:users,no_wa',],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'name.required' => 'Nama wajib diisi.',
+            'nim.required' => 'NIM wajib diisi.',
+            'nim.regex' => 'Format NIM tidak valid. Contoh: E1412300001 (E141, E241, E341, atau E441).',
+            'nim.unique' => 'NIM sudah terdaftar.',
+            'email.required' => 'Email wajib diisi.',
+            'email.email' => 'Format email tidak valid.',
+            'email.unique' => 'Email sudah terdaftar.',
+            'no_wa.required' => 'Nomor WhatsApp wajib diisi.',
+            'no_wa.regex' => 'Nomor WhatsApp harus terdiri dari 10–15 digit angka.',
+            'no_wa.unique' => 'Nomor WhatsApp sudah terdaftar.',
+            'password.required' => 'Password wajib diisi.',
+            'password.min' => 'Password minimal 8 karakter.',
+            'password.confirmed' => 'Konfirmasi password tidak cocok.',
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Requests\StorePengajuanMagangRequest.php ==========
+
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+class StorePengajuanMagangRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Ketua kelompok ditambahkan otomatis dari akun, jadi tidak perlu ada di daftar anggota.
+     * Saat revisi, data ketua lama bisa ikut terkirim bersama daftar anggota: entri itu
+     * dibuang di sini (bukan ditolak), supaya mahasiswa tidak terhenti oleh "NIM sudah dipakai".
+     */
+    protected function prepareForValidation(): void
+    {
+        $anggota = $this->input('anggota');
+
+        if (! is_array($anggota)) {
+            return;
+        }
+
+        $nimKetua = strtoupper(trim((string) $this->user()?->nim));
+
+        $this->merge([
+            'anggota' => array_values(array_filter(
+                $anggota,
+                fn ($a) => ! is_array($a)
+                    || $nimKetua === ''
+                    || strtoupper(trim((string) ($a['nim'] ?? ''))) !== $nimKetua
+            )),
+        ]);
+    }
+
+    public function rules(): array
+    {
+        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
+
+        // Total mahasiswa per pengajuan = 10 TERMASUK ketua, jadi anggota tambahan maksimal 9.
+        $maksTambahan = max((int) config('magang.maks_anggota', 10) - 1, 0);
+
+        $mulaiMinimal = $isUpdate ? 'after_or_equal:1900-01-01' : 'after_or_equal:today';
+
+        return [
+            'instansi' => ['required', 'string', 'max:255'],
+            'alamat_instansi' => ['required', 'string', 'max:500'],
+            'tanggal_mulai' => ['required', 'date', $mulaiMinimal],
+            'tanggal_selesai' => ['required', 'date', 'after:tanggal_mulai'],
+
+            // Instansi kedua (opsional) -> menghasilkan surat kedua
+            'instansi_kedua' => ['nullable', 'string', 'max:255', 'different:instansi'],
+            'alamat_instansi_kedua' => ['required_with:instansi_kedua', 'nullable', 'string', 'max:500'],
+            'tanggal_mulai_kedua' => ['required_with:instansi_kedua', 'nullable', 'date', $mulaiMinimal],
+            'tanggal_selesai_kedua' => ['required_with:instansi_kedua', 'nullable', 'date', 'after:tanggal_mulai_kedua'],
+
+            // Anggota tambahan selain ketua (ketua ditambahkan otomatis oleh service)
+            'anggota' => ['sometimes', 'nullable', 'array', "max:{$maksTambahan}"],
+            'anggota.*.nama' => ['required', 'string', 'max:255'],
+            'anggota.*.nim' => [
+                'required',
+                'string',
+                'regex:/^[A-Za-z][0-9]{10}$/',
+                'distinct:ignore_case',
+            ],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'anggota.max'              => 'Maksimal :max anggota tambahan (total ' . config('magang.maks_anggota', 10) . ' mahasiswa termasuk ketua).',
+            'anggota.*.nim.regex'      => 'NIM anggota harus berupa satu huruf diikuti 10 angka, contoh E1401241051.',
+            'anggota.*.nim.distinct'   => 'NIM anggota tidak boleh sama.',
+            'instansi_kedua.different' => 'Instansi kedua tidak boleh sama dengan instansi pertama.',
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'instansi' => 'nama instansi',
+            'alamat_instansi' => 'alamat instansi',
+            'tanggal_mulai' => 'tanggal mulai',
+            'tanggal_selesai' => 'tanggal selesai',
+            'instansi_kedua' => 'nama instansi kedua',
+            'alamat_instansi_kedua' => 'alamat instansi kedua',
+            'tanggal_mulai_kedua' => 'tanggal mulai instansi kedua',
+            'tanggal_selesai_kedua' => 'tanggal selesai instansi kedua',
+            'anggota' => 'anggota kelompok',
+            'anggota.*.nama' => 'nama anggota',
+            'anggota.*.nim' => 'NIM anggota',
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Requests\UbahStatusPengajuanRequest.php ==========
+
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class UbahStatusPengajuanRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    public function rules(): array
+    {
+        return [
+            'status'  => ['required', Rule::in(['setuju', 'revisi'])],
+            'catatan' => ['required_if:status,revisi', 'nullable', 'string', 'max:1000'],
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'status'  => 'status',
+            'catatan' => 'catatan revisi',
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'catatan.required_if' => 'Catatan wajib diisi jika pengajuan perlu direvisi.',
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Requests\Admin\UpdatePengajuanMagangRequest.php ==========
+
+<?php
+
+namespace App\Http\Requests\Admin;
+
+use App\Support\Departemen;
+use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class UpdatePengajuanMagangRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        $pengajuan = $this->route('pengajuan');
+        $userId = $pengajuan?->user_id ?? $pengajuan?->user?->id;
+
+        $afterMulaiPertama = $this->input('tanggal_mulai')
+            ? 'after:tanggal_mulai'
+            : 'after:' . ($pengajuan?->tanggal_mulai?->toDateString() ?? '1970-01-01');
+
+        $afterMulaiKedua = $this->input('tanggal_mulai_kedua')
+            ? 'after:tanggal_mulai_kedua'
+            : 'after:' . ($pengajuan?->tanggal_mulai_kedua?->toDateString() ?? '1970-01-01');
+
+        return [
+            // Data Mahasiswa Pengaju
+            'nama' => [
+                'sometimes',
+                'required',
+                'string',
+                'max:255',
+            ],
+
+            'nim' => [
+                'sometimes',
+                'required',
+                'string',
+                'regex:/^[A-Za-z][0-9]{10}$/',
+                Rule::unique('users', 'nim')->ignore($userId),
+            ],
+
+            // Data Instansi Pertama
+            'instansi' => [
+                'sometimes',
+                'required',
+                'string',
+                'max:255',
+            ],
+
+            'alamat_instansi' => [
+                'sometimes',
+                'required',
+                'string',
+                'max:5000',
+            ],
+
+            'tanggal_mulai' => [
+                'sometimes',
+                'required',
+                'date_format:Y-m-d',
+            ],
+
+            'tanggal_selesai' => [
+                'sometimes',
+                'required',
+                'date_format:Y-m-d',
+                $afterMulaiPertama,
+            ],
+
+            // Data Instansi Kedua (opsional)
+            'instansi_kedua' => [
+                'nullable',
+                'string',
+                'max:255',
+                'different:instansi',
+            ],
+
+            'alamat_instansi_kedua' => [
+                'required_with:instansi_kedua',
+                'nullable',
+                'string',
+                'max:5000',
+            ],
+
+            'tanggal_mulai_kedua' => [
+                'required_with:instansi_kedua',
+                'nullable',
+                'date_format:Y-m-d',
+            ],
+
+            'tanggal_selesai_kedua' => [
+                'required_with:instansi_kedua',
+                'nullable',
+                'date_format:Y-m-d',
+                $afterMulaiKedua,
+            ],
+
+            // Data Anggota Kelompok
+            'anggota' => [
+                'sometimes',
+                'nullable',
+                'array',
+                'max:' . config('magang.maks_anggota', 10),
+            ],
+
+            'anggota.*.nama' => [
+                'required',
+                'string',
+                'max:255',
+            ],
+
+            'anggota.*.nim' => [
+                'required',
+                'string',
+                'regex:/^[A-Za-z][0-9]{10}$/',
+                'distinct:ignore_case',
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'nama.required' => 'Nama mahasiswa pengaju wajib diisi.',
+            'nim.required' => 'NIM mahasiswa pengaju wajib diisi.',
+            'nim.regex' => 'Format NIM mahasiswa pengaju tidak valid, contoh: E1401241051.',
+            'nim.unique' => 'NIM mahasiswa pengaju sudah digunakan oleh akun lain.',
+            'instansi.required' => 'Nama instansi wajib diisi.',
+            'alamat_instansi.required' => 'Alamat instansi wajib diisi.',
+            'tanggal_mulai.required' => 'Tanggal mulai wajib diisi.',
+            'tanggal_selesai.required' => 'Tanggal selesai wajib diisi.',
+            'tanggal_selesai.after' => 'Tanggal selesai harus setelah tanggal mulai.',
+            'instansi_kedua.different' => 'Instansi kedua tidak boleh sama dengan instansi pertama.',
+            'alamat_instansi_kedua.required_with' => 'Alamat instansi kedua wajib diisi jika nama instansi kedua diisi.',
+            'tanggal_mulai_kedua.required_with' => 'Tanggal mulai instansi kedua wajib diisi jika nama instansi kedua diisi.',
+            'tanggal_selesai_kedua.required_with' => 'Tanggal selesai instansi kedua wajib diisi jika nama instansi kedua diisi.',
+            'tanggal_selesai_kedua.after' => 'Tanggal selesai instansi kedua harus setelah tanggal mulai instansi kedua.',
+            'anggota.max' => 'Total mahasiswa maksimal ' . config('magang.maks_anggota', 10) . ' orang.',
+            'anggota.*.nama.required' => 'Nama anggota wajib diisi.',
+            'anggota.*.nim.required' => 'NIM anggota wajib diisi.',
+            'anggota.*.nim.regex' => 'Format NIM anggota tidak valid, contoh: E1401241051.',
+            'anggota.*.nim.distinct' => 'NIM anggota tidak boleh sama.',
+        ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v): void {
+            $nimInput = $this->input('nim');
+            $pengajuan = $this->route('pengajuan');
+            $nimPengaju = strtoupper(trim((string) ($nimInput ?: $pengajuan?->user?->nim)));
+
+            if ($nimInput && ! Departemen::dariNim($nimInput)) {
+                $v->errors()->add('nim', 'Departemen untuk NIM ini tidak dikenali.');
+            }
+
+            $anggota = (array) $this->input('anggota', []);
+            $anggotaBukanKetua = 0;
+
+            foreach ($anggota as $i => $a) {
+                $nimAnggota = strtoupper(trim((string) ($a['nim'] ?? '')));
+                if ($nimAnggota !== '' && $nimAnggota !== $nimPengaju) {
+                    $anggotaBukanKetua++;
+                    if (! Departemen::dariNim($nimAnggota)) {
+                        $v->errors()->add("anggota.$i.nim", "Departemen untuk NIM {$nimAnggota} tidak dikenali.");
+                    }
+                }
+            }
+
+            $maksTambahan = max((int) config('magang.maks_anggota', 10) - 1, 0);
+            if ($anggotaBukanKetua > $maksTambahan) {
+                $v->errors()->add('anggota', "Maksimal {$maksTambahan} anggota tambahan (total " . config('magang.maks_anggota', 10) . " mahasiswa termasuk ketua).");
+            }
+        });
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Resources\PengajuanMagangAdminDetailResource.php ==========
+
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
+
+class PengajuanMagangAdminDetailResource extends PengajuanMagangAdminResource
+{
+    public function toArray(Request $request): array
+    {
+        return array_merge(parent::toArray($request), [
+            'alamat_instansi' => $this->alamat_instansi,
+            'tanggal_mulai' => $this->tanggal_mulai?->toDateString(),
+            'tanggal_selesai' => $this->tanggal_selesai?->toDateString(),
+
+            // Instansi kedua (null bila hanya satu instansi)
+            'alamat_instansi_kedua' => $this->alamat_instansi_kedua,
+            'tanggal_mulai_kedua'   => $this->tanggal_mulai_kedua?->toDateString(),
+            'tanggal_selesai_kedua' => $this->tanggal_selesai_kedua?->toDateString(),
+
+            // Semua mahasiswa dalam pengajuan: pengaju nomor 1, lalu anggota (departemen sudah berupa nama)
+            'daftar_mahasiswa' => $this->daftarAnggotaCetak(),
+
+            'catatan_revisi'  => $this->catatan_revisi,
+            'nomor_surat'     => $this->nomor_surat,
+            'nomor_surat_kedua' => $this->nomor_surat_kedua,
+            'diverifikasi_at' => $this->diverifikasi_at?->toIso8601String(),
+            'berkas'                => $this->daftarBerkas(),
+            'bukti_spp_url'         => $this->urlBerkas('bukti-spp', 'preview'),
+            'surat_rekomendasi_url' => $this->urlBerkas('surat-rekomendasi', 'preview'),
+            'status' => $this->status->value,
+        ]);
+    }
+
+    private function daftarBerkas(): array
+    {
+        // Bila ada dua instansi, label surat diberi keterangan instansi 1 / 2.
+        $dua = $this->jumlahInstansi() === 2;
+
+        $berkas = [
+            'surat-pengajuan'       => ['label' => 'Surat Pengajuan' . ($dua ? ' (Instansi 1)' : ''),       'path' => $this->file_surat_pengajuan],
+            'surat-pengajuan-kedua' => ['label' => 'Surat Pengajuan (Instansi 2)',                           'path' => $this->file_surat_pengajuan_kedua],
+            'bukti-spp'             => ['label' => 'Bukti Pembayaran SPP',                                   'path' => $this->file_bukti_spp],
+            'surat-rekomendasi'     => ['label' => 'Surat Rekomendasi',                                      'path' => $this->file_surat_rekomendasi],
+            'surat-magang'          => ['label' => 'Surat Pengantar Magang' . ($dua ? ' (Instansi 1)' : ''), 'path' => $this->file_surat_magang],
+            'surat-magang-kedua'    => ['label' => 'Surat Pengantar Magang (Instansi 2)',                    'path' => $this->file_surat_magang_kedua],
+        ];
+
+        $hasil = [];
+
+        foreach ($berkas as $jenis => $item) {
+            if (! $item['path']) {
+                continue;
+            }
+
+            $hasil[] = [
+                'jenis'        => $jenis,
+                'label'        => $item['label'],
+                'ekstensi'     => strtolower(pathinfo($item['path'], PATHINFO_EXTENSION)),
+                'preview_url'  => $this->urlBerkas($jenis, 'preview'),
+                'download_url' => $this->urlBerkas($jenis, 'download'),
+            ];
+        }
+
+        return $hasil;
+    }
+
+    /** Link sementara (30 menit) yang bertanda tangan, aman dipakai di iframe atau download. */
+    private function urlBerkas(string $jenis, string $mode = 'preview'): ?string
+    {
+        $kolom = match ($jenis) {
+            'surat-pengajuan'                  => $this->file_surat_pengajuan,
+            'surat-pengajuan-kedua'            => $this->file_surat_pengajuan_kedua,
+            'bukti-spp', 'spp'                 => $this->file_bukti_spp,
+            'surat-rekomendasi', 'rekomendasi' => $this->file_surat_rekomendasi,
+            'surat-magang'                     => $this->file_surat_magang,
+            'surat-magang-kedua'               => $this->file_surat_magang_kedua,
+            default                            => null,
+        };
+
+        if (! $kolom) {
+            return null;
+        }
+
+        $jenisNormal = match ($jenis) {
+            'spp'         => 'bukti-spp',
+            'rekomendasi' => 'surat-rekomendasi',
+            default       => $jenis,
+        };
+
+        return URL::temporarySignedRoute(
+            'admin.pengajuan.berkas',
+            now()->addMinutes(30),
+            [
+                'pengajuan' => $this->id,
+                'jenis'     => $jenisNormal,
+                'mode'      => $mode,
+            ]
+        );
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Resources\PengajuanMagangAdminResource.php ==========
+
+<?php
+
+namespace App\Http\Resources;
+
+use App\Models\PengajuanMagang;
+use App\Support\Departemen;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class PengajuanMagangAdminResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        // Pada daftar, jumlahnya sudah dihitung satu kali per halaman oleh controller;
+        // pada detail, dihitung di sini.
+        $atribut = $this->resource->getAttributes();
+        $jumlahPengajuan = array_key_exists('jumlah_pengajuan_mahasiswa', $atribut)
+            ? (int) $atribut['jumlah_pengajuan_mahasiswa']
+            : $this->resource->jumlahPengajuanMahasiswa();
+        $ambang = PengajuanMagang::ambangPeringatan();
+
+        return [
+            'id' => $this->id,
+
+            // Peringatan untuk admin: mahasiswa yang sama (NIM sama) sudah mengajukan 2 kali atau lebih.
+            'pengajuan_mahasiswa' => [
+                'jumlah'           => $jumlahPengajuan,
+                'ambang'           => $ambang,
+                'perlu_peringatan' => $jumlahPengajuan >= $ambang,
+            ],
+
+            'mahasiswa' => [
+                // SESUAIKAN dengan nama kolom di tabel users milik temanmu
+                'nama'            => $this->user->name,
+                'nim'             => $this->user->nim,
+                'departemen'      => Departemen::nama($this->user->departemen),
+                'departemen_kode' => $this->user->departemen,
+            ],
+            // Ketua + anggota tambahan (ketua dihitung dari akun, bukan dari snapshot lama).
+            'jumlah_mahasiswa' => $this->jumlahMahasiswa(),
+
+            'instansi'        => $this->instansi,
+            'instansi_kedua'  => $this->instansi_kedua,
+            'jumlah_surat'    => $this->jumlahInstansi(),
+            'tanggal_mulai'   => $this->tanggal_mulai?->toDateString(),
+            'tanggal_selesai' => $this->tanggal_selesai?->toDateString(),
+            'nomor_surat'       => $this->nomor_surat,
+            'nomor_surat_kedua' => $this->nomor_surat_kedua,
+            'status' => [
+                'value' => $this->status->value,
+                'label' => $this->status->label(),
+            ],
+            'dikirim_at' => $this->dikirim_at?->toIso8601String(),
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Resources\PengajuanMagangMahasiswaResource.php ==========
+
+<?php
+
+namespace App\Http\Resources;
+
+use App\Enums\StatusPengajuan;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
+
+/**
+ * Sama seperti PengajuanMagangResource, ditambah daftar berkas (dengan link bertanda tangan)
+ * supaya mahasiswa bisa melihat berkas yang sudah mereka kirim.
+ *
+ * Surat pengantar magang resmi (yang diterbitkan admin setelah disetujui) sengaja TIDAK
+ * disertakan: surat itu hanya untuk admin dan tidak ditampilkan ke mahasiswa.
+ */
+class PengajuanMagangMahasiswaResource extends PengajuanMagangResource
+{
+    public function toArray(Request $request): array
+    {
+        $setuju = $this->status === StatusPengajuan::Setuju;
+
+        return array_merge(parent::toArray($request), [
+            // Nomor surat hanya diberikan setelah pengajuan disetujui
+            'nomor_surat'       => $setuju ? $this->nomor_surat : null,
+            'nomor_surat_kedua' => $setuju ? $this->nomor_surat_kedua : null,
+
+            // Menggantikan 'berkas' bawaan (yang hanya true/false) dengan daftar berkas + link
+            'berkas'      => $this->daftarBerkas(),
+        ]);
+    }
+
+    private function daftarBerkas(): array
+    {
+        // Bila ada dua instansi, label surat diberi keterangan instansi 1 / 2.
+        $dua = $this->jumlahInstansi() === 2;
+
+        $berkas = [
+            'surat-pengajuan'       => ['label' => 'Surat Pengajuan' . ($dua ? ' (Instansi 1)' : ''), 'path' => $this->file_surat_pengajuan],
+            'surat-pengajuan-kedua' => ['label' => 'Surat Pengajuan (Instansi 2)',                     'path' => $this->file_surat_pengajuan_kedua],
+            'bukti-spp'             => ['label' => 'Bukti Pembayaran SPP',                             'path' => $this->file_bukti_spp],
+            'surat-rekomendasi'     => ['label' => 'Surat Rekomendasi',                                'path' => $this->file_surat_rekomendasi],
+        ];
+
+        $hasil = [];
+
+        foreach ($berkas as $jenis => $item) {
+            if (! $item['path']) {
+                continue;
+            }
+
+            $hasil[] = [
+                'jenis'        => $jenis,
+                'label'        => $item['label'],
+                'ekstensi'     => strtolower(pathinfo($item['path'], PATHINFO_EXTENSION)),
+                'preview_url'  => $this->urlBerkas($jenis, 'preview'),
+                'download_url' => $this->urlBerkas($jenis, 'download'),
+            ];
+        }
+
+        return $hasil;
+    }
+
+    /** Link sementara (30 menit) bertanda tangan; hanya dibuat untuk pemilik pengajuan. */
+    private function urlBerkas(string $jenis, string $mode): string
+    {
+        return URL::temporarySignedRoute(
+            'admin.pengajuan.berkas',
+            now()->addMinutes(30),
+            [
+                'pengajuan' => $this->id,
+                'jenis'     => $jenis,
+                'mode'      => $mode,
+            ]
+        );
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Resources\PengajuanMagangResource.php ==========
+
+<?php
+
+namespace App\Http\Resources;
+
+use App\Enums\StatusPengajuan;
+use App\Support\Departemen;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class PengajuanMagangResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        $this->resource->loadMissing('user');
+
+        $kodeDepartemen = $this->user?->departemen;
+
+        return [
+            'id' => $this->id,
+
+            // Data ketua selalu dari akun, jadi ikut berubah bila admin mengedit nama / NIM.
+            'mahasiswa' => [
+                'nama'            => $this->user?->name,
+                'nim'             => $this->user?->nim,
+                'departemen'      => $kodeDepartemen ? Departemen::nama($kodeDepartemen) : null,
+                'departemen_kode' => $kodeDepartemen,
+            ],
+
+            'instansi'        => $this->instansi,
+            'alamat_instansi' => $this->alamat_instansi,
+            'tanggal_mulai'   => $this->tanggal_mulai?->toDateString(),
+            'tanggal_selesai' => $this->tanggal_selesai?->toDateString(),
+
+            // Instansi kedua (null bila mahasiswa hanya mengajukan satu instansi)
+            'instansi_kedua'        => $this->instansi_kedua,
+            'alamat_instansi_kedua' => $this->alamat_instansi_kedua,
+            'tanggal_mulai_kedua'   => $this->tanggal_mulai_kedua?->toDateString(),
+            'tanggal_selesai_kedua' => $this->tanggal_selesai_kedua?->toDateString(),
+
+            // Banyaknya surat = banyaknya instansi (1 atau 2)
+            'jumlah_surat' => $this->jumlahInstansi(),
+
+            // Anggota kelompok SELAIN ketua (ketua ada di 'mahasiswa').
+            // Ketua sengaja tidak ikut, supaya saat revisi tidak terkirim balik sebagai anggota.
+            'jumlah_mahasiswa' => $this->jumlahMahasiswa(),
+            'anggota' => collect($this->anggotaTambahan())
+                ->map(fn (array $a) => [
+                    'nama'       => $a['nama'],
+                    'nim'        => $a['nim'],
+                    'departemen' => $a['departemen'] ? Departemen::nama($a['departemen']) : null,
+                ])
+                ->values()
+                ->all(),
+
+            'status' => [
+                'value' => $this->status->value,
+                'label' => $this->status->label(),
+            ],
+            // tampilkan catatan hanya saat status revisi
+            'catatan_revisi'       => $this->status === StatusPengajuan::Revisi ? $this->catatan_revisi : null,
+            'sudah_ditandatangani' => $this->sudahDitandatangani(),
+            'ditandatangani_at'    => $this->ditandatangani_at?->toIso8601String(),
+            'dikirim_at'           => $this->dikirim_at?->toIso8601String(),
+            'berkas' => [
+                'bukti_spp'         => $this->file_bukti_spp !== null,
+                'surat_rekomendasi' => $this->file_surat_rekomendasi !== null,
+            ],
+            'diverifikasi_at' => $this->diverifikasi_at?->toIso8601String(),
+            'dibuat_pada'     => $this->created_at->toIso8601String(),
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Http\Resources\UserResource.php ==========
+
+<?php
+
+namespace App\Http\Resources;
+
+use App\Support\Departemen;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class UserResource extends JsonResource
+{
+    public static $wrap = null;
+
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'nim' => $this->nim,
+
+            // Admin tidak punya departemen, jadi dikirim null.
+            'departemen' => $this->departemen
+                ? [
+                    'kode' => $this->departemen,
+                    'nama' => Departemen::namaDariKode($this->departemen),
+                ]
+                : null,
+
+            'email' => $this->email,
+            'no_wa' => $this->no_wa,
+
+            // Role dibaca dari Spatie (admin_kpap, mahasiswa, dst.), fallback ke kolom users.role.
+            'role' => $this->getRoleNames()->first()
+                ?? $this->role
+                ?? 'mahasiswa',
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\app\Services\NomorSuratService.php ==========
+
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\DB;
+
+class NomorSuratService
+{
+    /**
+     * Membuat nomor surat berikutnya, aman dari bentrok (baris dikunci selama transaksi).
+     * Dipanggil di dalam transaksi persetujuan, jadi nomor tidak "terbuang" kalau proses gagal.
+     */
+    public function berikutnya(?int $tahun = null): string
+    {
+        $tahun ??= now()->year;
+        $awal = max((int) config('magang.nomor_surat.mulai_dari', 1), 1);
+
+        return DB::transaction(function () use ($tahun, $awal) {
+            DB::table('nomor_surat_urut')->insertOrIgnore([
+                'tahun'    => $tahun,
+                'terakhir' => $awal - 1,
+            ]);
+
+            $baris = DB::table('nomor_surat_urut')
+                ->where('tahun', $tahun)
+                ->lockForUpdate()
+                ->first();
+
+            $urut = $baris->terakhir + 1;
+
+            DB::table('nomor_surat_urut')
+                ->where('tahun', $tahun)
+                ->update(['terakhir' => $urut]);
+
+            return str_replace(
+                ['{urut}', '{tahun}'],
+                [$urut, $tahun],
+                config('magang.nomor_surat.format'),
+            );
+        });
+    }
+}
+
+
+========== D:\form-magang-backend\app\Services\PengajuanMagangService.php ==========
+
+<?php
+
+namespace App\Services;
+
+use App\Enums\StatusPengajuan;
+use App\Models\PengajuanMagang;
+use App\Models\User;
+use App\Support\Departemen;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Throwable;
+
+class PengajuanMagangService
+{
+    /**
+     * Singkatan yang selalu ditulis KAPITAL pada nama instansi dan alamat
+     * (mis. "pt" atau "Pt" menjadi "PT"). Tambahan bisa dibuat di config/magang.php
+     * lewat kunci 'singkatan_instansi' (array string) tanpa mengubah kode ini.
+     */
+    private const SINGKATAN = [
+        'pt', 'cv', 'ud', 'pd', 'bumn', 'bumd', 'upt', 'uptd',
+        'kph', 'ksda', 'bksda', 'bbksda', 'bpdas', 'bpdashl', 'bpkh', 'bpth',
+        'tn', 'tni', 'polri', 'klhk', 'klh', 'brin', 'lipi', 'ipb', 'ui', 'ugm', 'itb', 'lsm',
+        'dki', 'diy', 'ntt', 'ntb', 'ri', 'rt', 'rw', 'km',
+        'ii', 'iii', 'iv', 'vi', 'vii', 'viii', 'ix',
+    ];
+
+    public function __construct(private SuratPengajuanService $surat) {}
+
+    /* =========================================================
+       MAHASISWA
+    ========================================================= */
+
+    public function buatDraft(User $user, array $data): PengajuanMagang
+    {
+        $pengajuan = new PengajuanMagang();
+
+        $pengajuan->instansi = $this->formatInstansi($data['instansi']);
+        $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
+        $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+        $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+
+        // Instansi kedua (opsional) -> surat kedua.
+        $this->isiInstansiKedua($pengajuan, $data);
+
+        $pengajuan->user_id = $user->id;
+        $pengajuan->nama = $user->name;
+        $pengajuan->anggota = $this->susunAnggota($user, $data['anggota'] ?? []);
+        $pengajuan->status = StatusPengajuan::Draft;
+        $pengajuan->kode_verifikasi = Str::random(32);
+
+        $pengajuan->save();
+
+        return $pengajuan;
+    }
+
+    public function perbarui(PengajuanMagang $pengajuan, array $data): PengajuanMagang
+    {
+        $this->pastikanBisaDiedit($pengajuan);
+        $pengajuan->loadMissing('user');
+
+        // Surat final instansi 1 dan 2 (bila ada) akan dibatalkan.
+        $fileLama = [
+            $pengajuan->file_surat_pengajuan,
+            $pengajuan->file_surat_pengajuan_kedua,
+        ];
+
+        $pengajuan->instansi = $this->formatInstansi($data['instansi']);
+        $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
+        $pengajuan->tanggal_mulai = $data['tanggal_mulai'];
+        $pengajuan->tanggal_selesai = $data['tanggal_selesai'];
+
+        // Instansi kedua hanya disentuh jika dikirim (null/kosong berarti dihapus).
+        if (array_key_exists('instansi_kedua', $data)) {
+            $this->isiInstansiKedua($pengajuan, $data);
+        }
+
+        // Ketua selalu mengikuti akun (bisa saja sudah diubah admin), anggota tambahan
+        // diganti bila dikirim dan dipertahankan bila tidak.
+        $pengajuan->nama = $pengajuan->user->name;
+        $pengajuan->anggota = $this->anggotaBaru($pengajuan, $data);
+
+        // Batalkan tanda tangan sebelumnya.
+        $pengajuan->ditandatangani_at = null;
+        $pengajuan->file_surat_pengajuan = null;
+        $pengajuan->file_surat_pengajuan_kedua = null;
+
+        $pengajuan->save();
+
+        $this->hapusFiles($fileLama);
+
+        return $pengajuan->refresh();
+    }
+
+    /**
+     * Tahap 2: preview surat untuk instansi ke-$urutan (1 atau 2).
+     * Kalau sudah ditandatangani, tampilkan versi final.
+     */
+    public function previewSurat(PengajuanMagang $pengajuan, int $urutan = 1): string
+    {
+        abort_if(
+            $urutan < 1 || $urutan > $pengajuan->jumlahInstansi(),
+            404,
+            'Surat untuk instansi tersebut tidak ada.'
+        );
+
+        if ($pengajuan->sudahDitandatangani()) {
+            $path = $pengajuan->fileSuratPengajuan($urutan);
+            $disk = Storage::disk('local');
+
+            // Pastikan file surat yang ditandatangani masih tersedia.
+            abort_unless(
+                $path && $disk->exists($path),
+                404,
+                'File surat yang ditandatangani tidak ditemukan.'
+            );
+
+            return $disk->get($path);
+        }
+
+        // Jika belum ditandatangani, tampilkan preview tanpa QR.
+        return $this->surat->render($pengajuan, denganQr: false, urutan: $urutan);
+    }
+
+    /**
+     * Tahap 2b: tanda tangan. Surat final dengan QR dibuat dan disimpan,
+     * satu PDF untuk tiap instansi (1 atau 2 surat).
+     */
+    public function tandaTangani(PengajuanMagang $pengajuan): PengajuanMagang
+    {
+        $this->pastikanBisaDiedit($pengajuan);
+
+        if ($pengajuan->sudahDitandatangani()) {
+            return $pengajuan;
+        }
+
+        $pathBaru = [];
+
+        try {
+            // Atur timestamp agar data surat yang dirender sesuai.
+            $pengajuan->ditandatangani_at = now();
+
+            foreach ($pengajuan->daftarInstansi() as $instansi) {
+                $path = $this->surat->simpan($pengajuan, $instansi['urutan']);
+
+                if (! $path) {
+                    throw new \RuntimeException('Gagal menyimpan surat pengajuan.');
+                }
+
+                $pathBaru[$instansi['urutan']] = $path;
+            }
+
+            $pengajuan->file_surat_pengajuan = $pathBaru[1];
+            $pengajuan->file_surat_pengajuan_kedua = $pathBaru[2] ?? null;
+            $pengajuan->save();
+
+            return $pengajuan->refresh();
+        } catch (Throwable $e) {
+            // Bersihkan file baru jika proses gagal.
+            $this->hapusFiles($pathBaru);
+
+            throw $e;
+        }
+    }
+
+    /** Membatalkan tanda tangan: semua surat final dan QR dihapus, preview kembali tanpa QR. */
+    public function batalkanTandaTangan(PengajuanMagang $pengajuan): PengajuanMagang
+    {
+        $this->pastikanBisaDiedit($pengajuan);
+
+        if (! $pengajuan->sudahDitandatangani()) {
+            return $pengajuan;
+        }
+
+        // Simpan path file lama sebelum mengubah data.
+        $fileLama = [
+            $pengajuan->file_surat_pengajuan,
+            $pengajuan->file_surat_pengajuan_kedua,
+        ];
+
+        // Hapus referensi tanda tangan dari database.
+        $pengajuan->ditandatangani_at = null;
+        $pengajuan->file_surat_pengajuan = null;
+        $pengajuan->file_surat_pengajuan_kedua = null;
+        $pengajuan->save();
+
+        // Hapus PDF lama setelah database berhasil disimpan.
+        $this->hapusFiles($fileLama);
+
+        return $pengajuan->refresh();
+    }
+
+    public function kirim(
+        PengajuanMagang $pengajuan,
+        ?UploadedFile $buktiSpp,
+        ?UploadedFile $suratRekomendasi
+    ): PengajuanMagang {
+        $this->pastikanBisaDiedit($pengajuan);
+
+        if (! $pengajuan->sudahDitandatangani()) {
+            throw ValidationException::withMessages([
+                'tanda_tangan' => 'Surat pengajuan harus ditandatangani terlebih dahulu.',
+            ]);
+        }
+
+        if (
+            (! $buktiSpp && ! $pengajuan->file_bukti_spp) ||
+            (! $suratRekomendasi && ! $pengajuan->file_surat_rekomendasi)
+        ) {
+            throw ValidationException::withMessages([
+                'berkas' => 'Bukti SPP dan surat rekomendasi wajib tersedia.',
+            ]);
+        }
+
+        $folder = "pengajuan/{$pengajuan->id}";
+        $berkasBaru = [];
+        $berkasLama = [
+            'file_bukti_spp'         => $pengajuan->file_bukti_spp,
+            'file_surat_rekomendasi' => $pengajuan->file_surat_rekomendasi,
+        ];
+
+        try {
+            // Simpan berkas baru tanpa menghapus berkas lama.
+            if ($buktiSpp) {
+                $berkasBaru['file_bukti_spp'] = $this->simpanBerkas($buktiSpp, $folder, 'bukti SPP');
+            }
+
+            if ($suratRekomendasi) {
+                $berkasBaru['file_surat_rekomendasi'] = $this->simpanBerkas($suratRekomendasi, $folder, 'surat rekomendasi');
+            }
+
+            // Perbarui database dalam transaksi.
+            DB::transaction(function () use ($pengajuan, $berkasBaru) {
+                foreach ($berkasBaru as $kolom => $path) {
+                    $pengajuan->{$kolom} = $path;
+                }
+
+                $pengajuan->status = StatusPengajuan::MenungguVerifikasi;
+                $pengajuan->dikirim_at = now();
+                $pengajuan->save();
+            });
+        } catch (Throwable $e) {
+            // Jika proses gagal, bersihkan berkas baru yang sempat tersimpan.
+            $this->hapusFiles($berkasBaru);
+
+            throw $e;
+        }
+
+        // Hapus berkas lama hanya setelah database berhasil diperbarui.
+        foreach ($berkasBaru as $kolom => $path) {
+            $pathLama = $berkasLama[$kolom] ?? null;
+
+            if ($pathLama && $pathLama !== $path) {
+                $this->hapusFile($pathLama);
+            }
+        }
+
+        return $pengajuan->refresh();
+    }
+
+    /* =========================================================
+       ADMIN
+    ========================================================= */
+
+    /**
+     * Memperbarui data pengajuan magang oleh admin (termasuk data mahasiswa pengaju,
+     * anggota kelompok, instansi 1, dan instansi 2).
+     *
+     * Ketua dan akun mahasiswa adalah satu data: nama / NIM / departemen yang diubah di sini
+     * langsung disimpan ke akun (users), dan ketua di surat selalu dibaca dari akun.
+     *
+     * @param array<string, mixed> $data
+     * @throws ValidationException
+     */
+    public function perbaruiOlehAdmin(PengajuanMagang $pengajuan, array $data): PengajuanMagang
+    {
+        $pengajuan->loadMissing('user');
+
+        $fileBaru = [];
+        $fileLama = [];
+
+        try {
+            DB::transaction(function () use ($pengajuan, $data, &$fileBaru, &$fileLama): void {
+                $user = $pengajuan->user;
+
+                // 1. Data mahasiswa pengaju (akun)
+                if (isset($data['nama'])) {
+                    $user->name = $this->formatNama($data['nama']);
+                }
+
+                if (isset($data['nim'])) {
+                    $nim = strtoupper(trim($data['nim']));
+                    $departemen = Departemen::dariNim($nim);
+
+                    if (! $departemen) {
+                        throw ValidationException::withMessages([
+                            'nim' => 'Departemen untuk NIM ini tidak dikenali.',
+                        ]);
+                    }
+
+                    $user->nim = $nim;
+                    $user->departemen = $departemen['kode'];
+                }
+
+                if ($user->isDirty()) {
+                    $user->save();
+                }
+
+                $pengajuan->nama = $user->name;
+
+                // 2. Instansi pertama
+                if (isset($data['instansi'])) {
+                    $pengajuan->instansi = $this->formatInstansi($data['instansi']);
+                }
+
+                if (isset($data['alamat_instansi'])) {
+                    $pengajuan->alamat_instansi = $this->formatInstansi($data['alamat_instansi']);
+                }
+
+                foreach (['tanggal_mulai', 'tanggal_selesai'] as $kolom) {
+                    if (isset($data[$kolom])) {
+                        $pengajuan->{$kolom} = $data[$kolom];
+                    }
+                }
+
+                // 3. Instansi kedua (kosong berarti dihapus beserta surat finalnya)
+                if (array_key_exists('instansi_kedua', $data)) {
+                    $this->isiInstansiKedua($pengajuan, $data);
+
+                    if ($pengajuan->jumlahInstansi() === 1 && $pengajuan->file_surat_pengajuan_kedua) {
+                        $fileLama[] = $pengajuan->file_surat_pengajuan_kedua;
+                        $pengajuan->file_surat_pengajuan_kedua = null;
+                    }
+                }
+
+                // 4. Anggota: ketua dibangun ulang dari akun, jadi tidak ada data ketua lama yang tersisa.
+                $pengajuan->anggota = $this->anggotaBaru($pengajuan, $data);
+
+                $pengajuan->save();
+
+                // 5. Surat yang sudah ditandatangani dirender ulang dengan data terbaru.
+                if ($pengajuan->sudahDitandatangani()) {
+                    foreach ([1 => 'file_surat_pengajuan', 2 => 'file_surat_pengajuan_kedua'] as $urutan => $kolom) {
+                        if ($urutan > $pengajuan->jumlahInstansi()) {
+                            continue;
+                        }
+
+                        if ($pengajuan->{$kolom}) {
+                            $fileLama[] = $pengajuan->{$kolom};
+                        }
+
+                        $path = $this->surat->simpan($pengajuan, $urutan);
+
+                        if (! $path) {
+                            throw new \RuntimeException('Gagal menyimpan ulang surat pengajuan.');
+                        }
+
+                        $fileBaru[] = $path;
+                        $pengajuan->{$kolom} = $path;
+                    }
+
+                    $pengajuan->save();
+                }
+            });
+        } catch (Throwable $e) {
+            // Transaksi dibatalkan: buang surat baru yang sempat dibuat.
+            $this->hapusFiles($fileBaru);
+
+            throw $e;
+        }
+
+        // Surat lama dihapus setelah database berhasil disimpan
+        // (path yang dipakai ulang oleh surat baru tidak ikut dihapus).
+        $this->hapusFiles(array_diff($fileLama, $fileBaru));
+
+        return $pengajuan->refresh();
+    }
+
+    /* =========================================================
+       HELPER
+    ========================================================= */
+
+    /**
+     * Instansi kedua: terisi bila nama instansi dikirim, selain itu semua kolomnya dikosongkan.
+     */
+    private function isiInstansiKedua(PengajuanMagang $pengajuan, array $data): void
+    {
+        if (filled($data['instansi_kedua'] ?? null)) {
+            $pengajuan->instansi_kedua = $this->formatInstansi($data['instansi_kedua']);
+            $pengajuan->alamat_instansi_kedua = $this->formatInstansi($data['alamat_instansi_kedua']);
+            $pengajuan->tanggal_mulai_kedua = $data['tanggal_mulai_kedua'];
+            $pengajuan->tanggal_selesai_kedua = $data['tanggal_selesai_kedua'];
+
+            return;
+        }
+
+        $pengajuan->instansi_kedua = null;
+        $pengajuan->alamat_instansi_kedua = null;
+        $pengajuan->tanggal_mulai_kedua = null;
+        $pengajuan->tanggal_selesai_kedua = null;
+    }
+
+    /**
+     * Daftar anggota yang disimpan: anggota tambahan dari $data bila dikirim,
+     * selain itu anggota tambahan yang sudah ada. Ketua selalu disusun ulang dari akun.
+     */
+    private function anggotaBaru(PengajuanMagang $pengajuan, array $data): array
+    {
+        $tambahan = array_key_exists('anggota', $data)
+            ? ($data['anggota'] ?? [])
+            : $pengajuan->anggotaTambahan();
+
+        return $this->susunAnggota($pengajuan->user, $tambahan);
+    }
+
+    /**
+     * Menyusun daftar kelompok: ketua (dari akun) selalu di urutan pertama, lalu anggota tambahan.
+     * Entri yang NIM-nya sama dengan ketua, kembar, atau berasal dari snapshot ketua lama
+     * (punya user_id) dilewati begitu saja. Total dibatasi config('magang.maks_anggota').
+     */
+    private function susunAnggota(User $user, ?array $anggotaTambahan): array
+    {
+        $nimKetua = strtoupper(trim((string) $user->nim));
+
+        $anggota = [
+            [
+                'user_id'    => $user->id,
+                'nama'       => $user->name,
+                'nim'        => $user->nim,
+                'departemen' => $user->departemen,
+            ],
+        ];
+
+        $terpakai = [$nimKetua => true];
+
+        foreach ($anggotaTambahan ?? [] as $member) {
+            $nim = strtoupper(trim((string) ($member['nim'] ?? '')));
+
+            if ($nim === '' || ! empty($member['user_id']) || isset($terpakai[$nim])) {
+                continue;
+            }
+
+            // Ambil departemen otomatis berdasarkan NIM
+            $departemen = Departemen::dariNim($nim);
+
+            if (! $departemen) {
+                throw ValidationException::withMessages([
+                    'anggota' => "NIM {$nim} memiliki kode departemen yang tidak dikenal.",
+                ]);
+            }
+
+            $terpakai[$nim] = true;
+
+            $anggota[] = [
+                'user_id'    => null,
+                'nama'       => $this->formatNama((string) ($member['nama'] ?? '')),
+                'nim'        => $nim,
+                'departemen' => $departemen['kode'],
+            ];
+        }
+
+        $maks = (int) config('magang.maks_anggota', 10);
+
+        if (count($anggota) > $maks) {
+            throw ValidationException::withMessages([
+                'anggota' => "Maksimal {$maks} mahasiswa per pengajuan (termasuk ketua).",
+            ]);
+        }
+
+        return $anggota;
+    }
+
+    /**
+     * Nama instansi / alamat: tiap kata diawali huruf kapital, dan singkatan
+     * (PT, CV, KPH, KM, RT, dst.) ditulis kapital penuh.
+     */
+    private function formatInstansi(string $value): string
+    {
+        $value = $this->formatNama($value);
+
+        $singkatan = array_unique(array_map(
+            'mb_strtolower',
+            array_merge(self::SINGKATAN, (array) config('magang.singkatan_instansi', []))
+        ));
+
+        $pola = '/\b(' . implode('|', array_map(
+            fn ($kata) => preg_quote($kata, '/'),
+            $singkatan
+        )) . ')\b/iu';
+
+        return preg_replace_callback(
+            $pola,
+            fn ($cocok) => mb_strtoupper($cocok[1]),
+            $value
+        );
+    }
+
+    private function formatNama(string $value): string
+    {
+        $value = mb_strtolower(trim($value));
+
+        return preg_replace_callback(
+            "/(^|[\s-])([\p{L}])/u",
+            fn ($matches) => $matches[1] . mb_strtoupper($matches[2]),
+            $value
+        );
+    }
+
+    private function simpanBerkas(UploadedFile $file, string $folder, string $nama): string
+    {
+        $path = $file->store($folder, 'local');
+
+        if (! $path) {
+            throw new \RuntimeException("Gagal menyimpan {$nama}.");
+        }
+
+        return $path;
+    }
+
+    private function pastikanBisaDiedit(PengajuanMagang $pengajuan): void
+    {
+        if (! $pengajuan->bisaDiedit()) {
+            throw ValidationException::withMessages([
+                'status' => 'Pengajuan sudah dikirim dan tidak bisa diubah.',
+            ]);
+        }
+    }
+
+    /** @param iterable<int|string, ?string> $paths */
+    private function hapusFiles(iterable $paths): void
+    {
+        foreach ($paths as $path) {
+            $this->hapusFile($path);
+        }
+    }
+
+    private function hapusFile(?string $path): void
+    {
+        if ($path) {
+            Storage::disk('local')->delete($path);
+        }
+    }
+}
+
+
+========== D:\form-magang-backend\app\Services\SuratMagangService.php ==========
+
+<?php
+
+namespace App\Services;
+
+use App\Models\PengajuanMagang;
+use Dompdf\Dompdf;
+use Dompdf\Options;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
+
+class SuratMagangService
+{
+    /**
+     * Membuat PDF surat pengantar magang untuk instansi ke-$urutan (1 atau 2) dan menyimpannya.
+     * Surat pertama memakai nama file lama (surat-magang.pdf) agar data lama tetap cocok.
+     */
+    public function simpan(PengajuanMagang $pengajuan, int $urutan = 1): string
+    {
+        $path = $urutan > 1
+            ? "pengajuan/{$pengajuan->id}/surat-magang-{$urutan}.pdf"
+            : "pengajuan/{$pengajuan->id}/surat-magang.pdf";
+
+        $berhasil = Storage::disk('local')->put(
+            $path,
+            $this->render($pengajuan, $urutan)
+        );
+
+        if (! $berhasil) {
+            throw new \RuntimeException(
+                'Gagal menyimpan PDF surat pengantar magang.'
+            );
+        }
+
+        return $path;
+    }
+
+    /**
+     * Membuat PDF surat pengantar magang untuk instansi ke-$urutan.
+     * Isi surat 1 memuat instansi 1, isi surat 2 memuat instansi 2.
+     */
+    public function render(PengajuanMagang $pengajuan, int $urutan = 1): string
+    {
+        $pengajuan->loadMissing('user');
+
+        $penandatangan = config('magang.penandatangan');
+
+        $instansi = $pengajuan->daftarInstansi()[$urutan - 1]
+            ?? throw new \InvalidArgumentException("Instansi ke-{$urutan} tidak ditemukan.");
+
+        $html = view('surat.suratmagang', [
+            'logo' => $this->gambar(config('magang.logo_path')),
+            'kop'  => config('magang.kop'),
+            'ttd'  => $this->gambar($penandatangan['ttd_path'] ?? null),
+
+            'fakultas'     => config('magang.fakultas'),
+            'kota'         => config('magang.kota'),
+            'nomor'        => $instansi['nomor'],
+            'tanggalSurat' => $this->tanggal(
+                $pengajuan->diverifikasi_at ?? now()
+            ),
+
+            // Pengaju nomor 1 + anggota tambahan (maks. 10 orang).
+            'anggota' => $pengajuan->daftarAnggotaCetak(),
+
+            // Data instansi untuk surat ini.
+            'instansi'       => $instansi['nama'],
+            'alamat'         => $instansi['alamat'],
+            'tanggalMulai'   => $this->tanggal($instansi['mulai']),
+            'tanggalSelesai' => $this->tanggal($instansi['selesai']),
+
+            'jabatan'           => $penandatangan['jabatan'],
+            'namaPenandatangan' => $penandatangan['nama'],
+            'nip'               => $penandatangan['nip'],
+        ])->render();
+
+        $options = new Options();
+        $options->set('isRemoteEnabled', false);
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+
+        return $dompdf->output();
+    }
+
+    /**
+     * Format tanggal berbahasa Indonesia.
+     * Contoh: 29 Oktober 2026.
+     */
+    private function tanggal($nilai): string
+    {
+        return Carbon::parse($nilai)
+            ->locale('id')
+            ->translatedFormat('j F Y');
+    }
+
+    /**
+     * Mengubah gambar di folder public menjadi data URI.
+     */
+    private function gambar(?string $relatif): ?string
+    {
+        if (! $relatif) {
+            return null;
+        }
+
+        $path = public_path($relatif);
+
+        if (! is_file($path)) {
+            return null;
+        }
+
+        $mime = mime_content_type($path);
+
+        if (! in_array($mime, ['image/png', 'image/jpeg'], true)) {
+            return null;
+        }
+
+        $konten = file_get_contents($path);
+
+        if ($konten === false) {
+            return null;
+        }
+
+        return 'data:' . $mime . ';base64,' . base64_encode($konten);
+    }
+}
+
+
+========== D:\form-magang-backend\app\Services\SuratPengajuanService.php ==========
+
+<?php
+
+namespace App\Services;
+
+use App\Models\PengajuanMagang;
+use Dompdf\Dompdf;
+use Dompdf\Options;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\Writer\PngWriter;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use RuntimeException;
+
+class SuratPengajuanService
+{
+    /**
+     * Membuat PDF final dengan QR untuk instansi ke-$urutan (1 atau 2) dan menyimpannya.
+     * Mengembalikan path file yang berhasil disimpan.
+     */
+    public function simpan(PengajuanMagang $pengajuan, int $urutan = 1): string
+    {
+        // Gunakan nama unik agar tidak menimpa file sebelumnya.
+        $path = "pengajuan/{$pengajuan->id}/surat-pengajuan-{$urutan}-"
+            . Str::uuid()
+            . '.pdf';
+
+        // Buat PDF final dengan QR verifikasi.
+        $pdf = $this->render($pengajuan, denganQr: true, urutan: $urutan);
+
+        // Simpan PDF ke local storage.
+        $berhasil = Storage::disk('local')->put($path, $pdf);
+
+        // Pastikan penyimpanan berhasil.
+        if (! $berhasil) {
+            throw new RuntimeException(
+                'Gagal menyimpan PDF surat pengajuan.'
+            );
+        }
+
+        return $path;
+    }
+
+    /**
+     * Membuat isi PDF untuk instansi ke-$urutan.
+     * Tanpa QR digunakan untuk preview sebelum tanda tangan.
+     */
+    public function render(
+        PengajuanMagang $pengajuan,
+        bool $denganQr,
+        int $urutan = 1
+    ): string {
+        $pengajuan->loadMissing('user');
+
+        if (! $pengajuan->user) {
+            throw new RuntimeException(
+                'Data mahasiswa pemilik pengajuan tidak ditemukan.'
+            );
+        }
+
+        $instansi = $pengajuan->daftarInstansi()[$urutan - 1]
+            ?? throw new RuntimeException("Instansi ke-{$urutan} tidak ditemukan.");
+
+        // Ketua nomor 1 + anggota tambahan. Departemen sudah berupa nama (bukan kode).
+        $daftar  = $pengajuan->daftarAnggotaCetak();
+        $pengaju = $daftar[0];
+
+        $html = view('surat.pengajuan', [
+            'anggota' => $daftar,
+            'nama' => $pengaju['nama'],
+            'nim' => $pengaju['nim'],
+            'departemen' => $pengaju['departemen'],
+
+            'fakultas' => config('magang.fakultas'),
+            'kota' => config('magang.kota'),
+
+            'instansi' => $instansi['nama'],
+            'alamat' => $instansi['alamat'],
+
+            'tanggalMulai' => $this->tanggal($instansi['mulai']),
+            'tanggalSelesai' => $this->tanggal($instansi['selesai']),
+
+            'tanggalSurat' => $this->tanggal(
+                $pengajuan->ditandatangani_at ?? now()
+            ),
+
+            'qr' => $denganQr ? $this->buatQr($pengajuan, $urutan) : null,
+        ])->render();
+
+        $options = new Options();
+        $options->set('isRemoteEnabled', false);
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+
+        return $dompdf->output();
+    }
+
+    /** Tanggal berbahasa Indonesia, contoh: "29 Oktober 2026". */
+    private function tanggal($nilai): string
+    {
+        return Carbon::parse($nilai)->locale('id')->translatedFormat('j F Y');
+    }
+
+    /**
+     * Membuat QR Code yang mengarah ke halaman verifikasi surat.
+     * Surat instansi kedua memakai "?urutan=2" supaya QR-nya membuka surat yang tepat.
+     */
+    private function buatQr(PengajuanMagang $pengajuan, int $urutan = 1): string
+    {
+        $verifikasiUrl = rtrim((string) config('magang.verifikasi_url'), '/');
+
+        if ($verifikasiUrl === '' || empty($pengajuan->kode_verifikasi)) {
+            throw new RuntimeException('URL verifikasi atau kode verifikasi belum dikonfigurasi.');
+        }
+
+        $url = $verifikasiUrl . '/' . $pengajuan->kode_verifikasi;
+
+        if ($urutan > 1) {
+            $url .= '?urutan=' . $urutan;
+        }
+
+        $qrCode = new QrCode(
+            data: $url,
+            size: 200,
+            margin: 5
+        );
+
+        return (new PngWriter())
+            ->write($qrCode)
+            ->getDataUri();
+    }
+}
+
+
+========== D:\form-magang-backend\app\Services\SuratWhatsAppService.php ==========
+
+<?php
+
+namespace App\Services;
+
+use App\Enums\StatusPengajuan;
+use App\Models\PengajuanMagang;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\ValidationException;
+
+class SuratWhatsAppService
+{
+    /**
+     * Membuat link unduh sementara dan URL wa.me untuk satu surat magang.
+     * Tidak mengirim apa pun: admin sendiri yang menekan "kirim" di WhatsApp.
+     *
+     * @return array<string, mixed>
+     */
+    public function buat(PengajuanMagang $pengajuan, int $urutan): array
+    {
+        $pengajuan->loadMissing('user');
+
+        if ($pengajuan->status !== StatusPengajuan::Setuju) {
+            $this->tolak('status', 'Surat hanya bisa dikirim setelah pengajuan disetujui.');
+        }
+
+        $instansi = collect($pengajuan->daftarInstansi())->firstWhere('urutan', $urutan);
+
+        if ($instansi === null) {
+            $this->tolak('urutan', "Pengajuan ini tidak memiliki instansi ke-{$urutan}.");
+        }
+
+        $path = $pengajuan->fileSuratMagang($urutan);
+
+        if (blank($path)) {
+            $this->tolak('urutan', 'Surat magang untuk instansi ini belum tersedia.');
+        }
+
+        if (! Storage::disk('local')->exists($path)) {
+            $this->tolak('berkas', 'File surat tidak ditemukan di penyimpanan.');
+        }
+
+        $noWa = $pengajuan->user?->no_wa;
+
+        if (blank($noWa)) {
+            $this->tolak('no_wa', 'Mahasiswa belum memiliki nomor WhatsApp.');
+        }
+
+        $nomorTujuan = $this->normalisasiNomor($noWa);
+
+        if ($nomorTujuan === null) {
+            $this->tolak('no_wa', 'Format nomor WhatsApp mahasiswa tidak valid.');
+        }
+
+        // Masa berlaku link (menit). Default 3 hari; bisa diatur di config/magang.php.
+        $menit = max(1, (int) config('magang.link_surat_berlaku_menit', 4320));
+        $berlakuSampai = now()->addMinutes($menit);
+
+        $url = URL::temporarySignedRoute('surat-magang.unduh', $berlakuSampai, [
+            'pengajuan' => $pengajuan->id,
+            'urutan'    => $urutan,
+        ]);
+
+        $pesan = $this->susunPesan($pengajuan, $instansi, $url, $berlakuSampai);
+
+        return [
+            'urutan'         => $urutan,
+            'instansi'       => $instansi['nama'],
+            'nomor_surat'    => $instansi['nomor'],
+            'nomor_tujuan'   => $nomorTujuan,
+            'pesan'          => $pesan,
+            'download_url'   => $url,
+            'berlaku_sampai' => $berlakuSampai->toIso8601String(),
+            'whatsapp_url'   => 'https://wa.me/' . $nomorTujuan . '?text=' . rawurlencode($pesan),
+        ];
+    }
+
+    /**
+     * Mengubah 08xx / +62 8xx / 62-8xx / 8xx menjadi 628xx (format wa.me, tanpa "+").
+     * Mengembalikan null bila tidak bisa dikenali sebagai nomor Indonesia.
+     */
+    public function normalisasiNomor(?string $nomor): ?string
+    {
+        $digit = preg_replace('/\D+/', '', (string) $nomor); // buang spasi, +, -, kurung
+
+        if ($digit === '') {
+            return null;
+        }
+
+        if (str_starts_with($digit, '00')) {
+            $digit = substr($digit, 2); // 0062... -> 62...
+        }
+
+        if (str_starts_with($digit, '62')) {
+            // sudah berformat internasional
+        } elseif (str_starts_with($digit, '0')) {
+            $digit = '62' . substr($digit, 1);
+        } elseif (str_starts_with($digit, '8')) {
+            $digit = '62' . $digit;
+        } else {
+            return null;
+        }
+
+        // Salah ketik "+62 0812..." -> buang 0 setelah kode negara
+        if (str_starts_with($digit, '620')) {
+            $digit = '62' . substr($digit, 3);
+        }
+
+        return preg_match('/^62\d{8,13}$/', $digit) ? $digit : null;
+    }
+
+    private function susunPesan(
+        PengajuanMagang $pengajuan,
+        array $instansi,
+        string $url,
+        CarbonInterface $berlakuSampai
+    ): string {
+        $batas = $berlakuSampai->copy()
+            ->timezone('Asia/Jakarta')
+            ->locale('id')
+            ->translatedFormat('j F Y, H:i');
+
+        $baris = [
+            "Halo {$pengajuan->user->name},",
+            '',
+            'Surat Pengantar Magang untuk pengajuan Anda telah terbit.',
+            '',
+            "Instansi: {$instansi['nama']}",
+        ];
+
+        if (filled($instansi['nomor'])) {
+            $baris[] = "Nomor surat: {$instansi['nomor']}";
+        }
+
+        if ($instansi['mulai'] && $instansi['selesai']) {
+            $baris[] = 'Periode magang: ' . $this->tanggal($instansi['mulai'])
+                . ' s.d. ' . $this->tanggal($instansi['selesai']);
+        }
+
+        $baris[] = '';
+        $baris[] = "Unduh surat melalui tautan berikut (berlaku sampai {$batas} WIB):";
+        $baris[] = $url;
+        $baris[] = '';
+        $baris[] = 'Terima kasih.';
+
+        return implode("\n", $baris);
+    }
+
+    private function tanggal(CarbonInterface $tanggal): string
+    {
+        return $tanggal->copy()->locale('id')->translatedFormat('j F Y');
+    }
+
+    private function tolak(string $kolom, string $pesan): never
+    {
+        throw ValidationException::withMessages([$kolom => $pesan]);
+    }
+}
+
+
+========== D:\form-magang-backend\app\Services\VerifikasiPengajuanService.php ==========
+
+<?php
+
+namespace App\Services;
+
+use App\Enums\StatusPengajuan;
+use App\Models\PengajuanMagang;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+use Throwable;
+
+class VerifikasiPengajuanService
+{
+    public function __construct(
+        private NomorSuratService $nomorSurat,
+        private SuratMagangService $suratMagang,
+    ) {
+    }
+
+    /**
+     * Admin menyetujui: satu nomor surat dan satu surat pengantar magang untuk TIAP instansi.
+     * Satu instansi menghasilkan 1 surat, dua instansi menghasilkan 2 surat bernomor berbeda.
+     */
+    public function setujui(PengajuanMagang $pengajuan, User $admin): PengajuanMagang
+    {
+        $pathSurat = [];
+
+        try {
+            return DB::transaction(function () use ($pengajuan, $admin, &$pathSurat) {
+                $p = $this->kunciDanPastikanMenunggu($pengajuan);
+
+                // Nomor surat: instansi 1 lebih dulu, lalu instansi 2 (nomor berurutan).
+                $p->nomor_surat = $this->nomorSurat->berikutnya();
+                $p->nomor_surat_kedua = $p->jumlahInstansi() === 2
+                    ? $this->nomorSurat->berikutnya()
+                    : null;
+
+                $p->status = StatusPengajuan::Setuju;
+                $p->diverifikasi_oleh = $admin->id;
+                $p->diverifikasi_at = now();
+
+                foreach ($p->daftarInstansi() as $instansi) {
+                    $pathSurat[$instansi['urutan']] = $this->suratMagang->simpan($p, $instansi['urutan']);
+                }
+
+                $p->file_surat_magang = $pathSurat[1];
+                $p->file_surat_magang_kedua = $pathSurat[2] ?? null;
+                $p->save();
+
+                return $p;
+            });
+        } catch (Throwable $e) {
+            foreach ($pathSurat as $path) {
+                Storage::disk('local')->delete($path);
+            }
+
+            throw $e;
+        }
+    }
+
+    /** Admin meminta revisi: catatan tersimpan, mahasiswa bisa memperbaiki. */
+    public function mintaRevisi(PengajuanMagang $pengajuan, User $admin, string $catatan): PengajuanMagang
+    {
+        return DB::transaction(function () use ($pengajuan, $admin, $catatan) {
+            $p = $this->kunciDanPastikanMenunggu($pengajuan);
+
+            $p->status = StatusPengajuan::Revisi;
+            $p->catatan_revisi = $catatan;
+            $p->diverifikasi_oleh = $admin->id;
+            $p->diverifikasi_at = now();
+            $p->save();
+
+            return $p;
+        });
+    }
+
+    /** Ambil ulang barisnya dengan kunci, supaya dua admin tidak memproses pengajuan yang sama. */
+    private function kunciDanPastikanMenunggu(PengajuanMagang $pengajuan): PengajuanMagang
+    {
+        $p = PengajuanMagang::whereKey($pengajuan->id)->lockForUpdate()->firstOrFail();
+
+        if ($p->status !== StatusPengajuan::MenungguVerifikasi) {
+            throw ValidationException::withMessages([
+                'status' => 'Hanya pengajuan berstatus menunggu verifikasi yang bisa diproses.',
+            ]);
+        }
+
+        return $p;
+    }
+}
+
+
+========== D:\form-magang-backend\app\Enums\StatusPengajuan.php ==========
+
+<?php
+
+namespace App\Enums;
+
+enum StatusPengajuan: string
+{
+    case Draft = 'draft';
+    case MenungguVerifikasi = 'menunggu_verifikasi';
+    case Setuju = 'setuju';
+    case Revisi = 'revisi';
+
+    public function label(): string
+    {
+        return match ($this) {
+            self::Draft => 'Draft',
+            self::MenungguVerifikasi => 'Menunggu Verifikasi',
+            self::Setuju => 'Setuju',
+            self::Revisi => 'Revisi',
+        };
+    }
+}
+
+
+========== D:\form-magang-backend\app\Support\Departemen.php ==========
+
+<?php
+
+namespace App\Support;
+
+class Departemen
+{
+    /**
+     * Prefix NIM (4 karakter pertama) => KODE departemen.
+     * Yang disimpan di users.departemen adalah kodenya; nama lengkap dibaca dari
+     * config/departemen.php saat ditampilkan (surat, API, dashboard).
+     */
+    private const PREFIX_NIM = [
+        'E141' => 'MNH',
+        'E241' => 'HH',
+        'E341' => 'KSHE',
+        'E441' => 'SVK',
+    ];
+
+    /** Nama lengkap dari kode departemen. Kalau kode tidak dikenal, dikembalikan apa adanya. */
+    public static function nama(?string $kode): string
+    {
+        if (! $kode) {
+            return '-';
+        }
+
+        return config("departemen.{$kode}", $kode);
+    }
+
+    /**
+     * Nama lengkap untuk respons API. Akun tanpa departemen (misalnya admin)
+     * menghasilkan null, bukan "-".
+     */
+    public static function namaDariKode(?string $kode): ?string
+    {
+        if (! $kode) {
+            return null;
+        }
+
+        return self::nama($kode);
+    }
+
+    /**
+     * Departemen dari prefix NIM (4 karakter pertama, contoh: "E441").
+     * Hasil: ['kode' => 'SVK', 'nama' => 'Silvikultur'], atau null kalau prefix tidak dikenal.
+     */
+    public static function dariNim(?string $nim): ?array
+    {
+        $prefix = substr(strtoupper(trim((string) $nim)), 0, 4);
+        $kode = self::PREFIX_NIM[$prefix] ?? null;
+
+        if (! $kode) {
+            return null;
+        }
+
+        return [
+            'kode' => $kode,
+            'nama' => self::nama($kode),
+        ];
+    }
+}
+
+
+========== D:\form-magang-backend\database\migrations\0001_01_01_000000_create_users_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('users', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->timestamp('email_verified_at')->nullable();
+            $table->string('password');
+            $table->rememberToken();
+            $table->timestamps();
+        });
+
+        Schema::create('password_reset_tokens', function (Blueprint $table) {
+            $table->string('email')->primary();
+            $table->string('token');
+            $table->timestamp('created_at')->nullable();
+        });
+
+        Schema::create('sessions', function (Blueprint $table) {
+            $table->string('id')->primary();
+            $table->foreignId('user_id')->nullable()->index();
+            $table->string('ip_address', 45)->nullable();
+            $table->text('user_agent')->nullable();
+            $table->longText('payload');
+            $table->integer('last_activity')->index();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('users');
+        Schema::dropIfExists('password_reset_tokens');
+        Schema::dropIfExists('sessions');
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\0001_01_01_000001_create_cache_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('cache', function (Blueprint $table) {
+            $table->string('key')->primary();
+            $table->mediumText('value');
+            $table->bigInteger('expiration')->index();
+        });
+
+        Schema::create('cache_locks', function (Blueprint $table) {
+            $table->string('key')->primary();
+            $table->string('owner');
+            $table->bigInteger('expiration')->index();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('cache');
+        Schema::dropIfExists('cache_locks');
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\0001_01_01_000002_create_jobs_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('jobs', function (Blueprint $table) {
+            $table->id();
+            $table->string('queue')->index();
+            $table->longText('payload');
+            $table->unsignedSmallInteger('attempts');
+            $table->unsignedInteger('reserved_at')->nullable();
+            $table->unsignedInteger('available_at');
+            $table->unsignedInteger('created_at');
+        });
+
+        Schema::create('job_batches', function (Blueprint $table) {
+            $table->string('id')->primary();
+            $table->string('name');
+            $table->integer('total_jobs');
+            $table->integer('pending_jobs');
+            $table->integer('failed_jobs');
+            $table->longText('failed_job_ids');
+            $table->mediumText('options')->nullable();
+            $table->integer('cancelled_at')->nullable();
+            $table->integer('created_at');
+            $table->integer('finished_at')->nullable();
+        });
+
+        Schema::create('failed_jobs', function (Blueprint $table) {
+            $table->id();
+            $table->string('uuid')->unique();
+            $table->string('connection');
+            $table->string('queue');
+            $table->longText('payload');
+            $table->longText('exception');
+            $table->timestamp('failed_at')->useCurrent();
+
+            $table->index(['connection', 'queue', 'failed_at']);
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('jobs');
+        Schema::dropIfExists('job_batches');
+        Schema::dropIfExists('failed_jobs');
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_10_20_024354_create_personal_access_tokens_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('personal_access_tokens', function (Blueprint $table) {
+            $table->id();
+            $table->morphs('tokenable');
+            $table->text('name');
+            $table->string('token', 64)->unique();
+            $table->text('abilities')->nullable();
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamp('expires_at')->nullable()->index();
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('personal_access_tokens');
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_10_20_031415_add_nim_and_departemen_to_users_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+             $table->string('nim')->nullable()->unique();
+             $table->string('departemen')->nullable();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+           $table->dropUnique(['nim']);
+           $table->dropColumn(['nim', 'departemen']);
+        });
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_10_20_035223_create_pengajuan_magangs_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('pengajuan_magang', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+
+            // data form
+            $table->string('instansi');
+            $table->text('alamat_instansi');
+            $table->date('tanggal_mulai');
+            $table->date('tanggal_selesai');
+
+            // file upload mahasiswa
+            $table->string('file_bukti_spp')->nullable();
+            $table->string('file_surat_rekomendasi')->nullable();
+
+            // status dan verifikasi admin
+            $table->string('status', 30)->default('draft')->index();
+            $table->text('catatan_revisi')->nullable();
+            $table->foreignId('diverifikasi_oleh')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamp('diverifikasi_at')->nullable();
+
+            // surat dan alur kirim
+            $table->string('kode_verifikasi', 40)->unique();
+            $table->timestamp('ditandatangani_at')->nullable();
+            $table->timestamp('dikirim_at')->nullable();
+            $table->string('nomor_surat')->nullable()->unique();
+            $table->string('file_surat_pengajuan')->nullable();
+            $table->string('file_surat_magang')->nullable();
+
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {   
+        Schema::dropIfExists('pengajuan_magang');
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_10_20_041151_add_role_to_users_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            $table->string('role')->default('mahasiswa');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            $table->dropColumn('role');
+        });
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_10_20_083433_create_nomor_surat_urut_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        // satu baris per tahun, menyimpan nomor urut terakhir yang dipakai
+        Schema::create('nomor_surat_urut', function (Blueprint $table) {
+            $table->unsignedSmallInteger('tahun')->primary();
+            $table->unsignedInteger('terakhir')->default(0);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('nomor_surat_urut');
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_10_26_015321_add_nama_to_pengajuan_magang_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->string('nama')->nullable()->after('user_id');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->dropColumn('nama');
+        });
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_10_27_020721_create_permission_tables.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        $teams = config('permission.teams');
+        $tableNames = config('permission.table_names');
+        $columnNames = config('permission.column_names');
+        $pivotRole = $columnNames['role_pivot_key'] ?? 'role_id';
+        $pivotPermission = $columnNames['permission_pivot_key'] ?? 'permission_id';
+
+        throw_if(empty($tableNames), 'Error: config/permission.php not loaded. Run [php artisan config:clear] and try again.');
+        throw_if($teams && empty($columnNames['team_foreign_key'] ?? null), 'Error: team_foreign_key on config/permission.php not loaded. Run [php artisan config:clear] and try again.');
+
+        /**
+         * See `docs/prerequisites.md` for suggested lengths on 'name' and 'guard_name' if "1071 Specified key was too long" errors are encountered.
+         */
+        Schema::create($tableNames['permissions'], static function (Blueprint $table) {
+            $table->id(); // permission id
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+
+            $table->unique(['name', 'guard_name']);
+        });
+
+        /**
+         * See `docs/prerequisites.md` for suggested lengths on 'name' and 'guard_name' if "1071 Specified key was too long" errors are encountered.
+         */
+        Schema::create($tableNames['roles'], static function (Blueprint $table) use ($teams, $columnNames) {
+            $table->id(); // role id
+            if ($teams || config('permission.testing')) { // permission.testing is a fix for sqlite testing
+                $table->unsignedBigInteger($columnNames['team_foreign_key'])->nullable();
+                $table->index($columnNames['team_foreign_key'], 'roles_team_foreign_key_index');
+            }
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+            if ($teams || config('permission.testing')) {
+                $table->unique([$columnNames['team_foreign_key'], 'name', 'guard_name']);
+            } else {
+                $table->unique(['name', 'guard_name']);
+            }
+        });
+
+        Schema::create($tableNames['model_has_permissions'], static function (Blueprint $table) use ($tableNames, $columnNames, $pivotPermission, $teams) {
+            $table->unsignedBigInteger($pivotPermission);
+
+            $table->string('model_type');
+            $table->unsignedBigInteger($columnNames['model_morph_key']);
+            $table->index([$columnNames['model_morph_key'], 'model_type'], 'model_has_permissions_model_id_model_type_index');
+
+            $table->foreign($pivotPermission)
+                ->references('id') // permission id
+                ->on($tableNames['permissions'])
+                ->cascadeOnDelete();
+            if ($teams) {
+                $table->unsignedBigInteger($columnNames['team_foreign_key']);
+                $table->index($columnNames['team_foreign_key'], 'model_has_permissions_team_foreign_key_index');
+
+                $table->primary([$columnNames['team_foreign_key'], $pivotPermission, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_permissions_permission_model_type_primary');
+            } else {
+                $table->primary([$pivotPermission, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_permissions_permission_model_type_primary');
+            }
+        });
+
+        Schema::create($tableNames['model_has_roles'], static function (Blueprint $table) use ($tableNames, $columnNames, $pivotRole, $teams) {
+            $table->unsignedBigInteger($pivotRole);
+
+            $table->string('model_type');
+            $table->unsignedBigInteger($columnNames['model_morph_key']);
+            $table->index([$columnNames['model_morph_key'], 'model_type'], 'model_has_roles_model_id_model_type_index');
+
+            $table->foreign($pivotRole)
+                ->references('id') // role id
+                ->on($tableNames['roles'])
+                ->cascadeOnDelete();
+            if ($teams) {
+                $table->unsignedBigInteger($columnNames['team_foreign_key']);
+                $table->index($columnNames['team_foreign_key'], 'model_has_roles_team_foreign_key_index');
+
+                $table->primary([$columnNames['team_foreign_key'], $pivotRole, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_roles_role_model_type_primary');
+            } else {
+                $table->primary([$pivotRole, $columnNames['model_morph_key'], 'model_type'],
+                    'model_has_roles_role_model_type_primary');
+            }
+        });
+
+        Schema::create($tableNames['role_has_permissions'], static function (Blueprint $table) use ($tableNames, $pivotRole, $pivotPermission) {
+            $table->unsignedBigInteger($pivotPermission);
+            $table->unsignedBigInteger($pivotRole);
+
+            $table->foreign($pivotPermission)
+                ->references('id') // permission id
+                ->on($tableNames['permissions'])
+                ->cascadeOnDelete();
+
+            $table->foreign($pivotRole)
+                ->references('id') // role id
+                ->on($tableNames['roles'])
+                ->cascadeOnDelete();
+
+            $table->primary([$pivotPermission, $pivotRole], 'role_has_permissions_permission_id_role_id_primary');
+        });
+
+        app('cache')
+            ->store(config('permission.cache.store') != 'default' ? config('permission.cache.store') : null)
+            ->forget(config('permission.cache.key'));
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        $tableNames = config('permission.table_names');
+
+        throw_if(empty($tableNames), 'Error: config/permission.php not found and defaults could not be merged. Please publish the package configuration before proceeding, or drop the tables manually.');
+
+        Schema::dropIfExists($tableNames['role_has_permissions']);
+        Schema::dropIfExists($tableNames['model_has_roles']);
+        Schema::dropIfExists($tableNames['model_has_permissions']);
+        Schema::dropIfExists($tableNames['roles']);
+        Schema::dropIfExists($tableNames['permissions']);
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_11_11_092340_add_anggota_to_pengajuan_magang_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->json('anggota')->nullable()->after('nama');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->dropColumn('anggota');
+        });
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_11_11_100658_add_instansi_kedua_to_pengajuan_magang_table.php ==========
+
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->string('instansi_kedua')->nullable()->after('instansi');
+            $table->text('alamat_instansi_kedua')->nullable()->after('alamat_instansi');
+            $table->date('tanggal_mulai_kedua')->nullable()->after('tanggal_selesai');
+            $table->date('tanggal_selesai_kedua')->nullable()->after('tanggal_mulai_kedua');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->dropColumn([
+                'instansi_kedua',
+                'alamat_instansi_kedua',
+                'tanggal_mulai_kedua',
+                'tanggal_selesai_kedua',
+            ]);
+        });
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_11_11_140452_add_surat_kedua_to_pengajuan_magang_table.php ==========
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Surat untuk instansi kedua: nomor surat, PDF form pengajuan, dan PDF surat pengantar.
+     * ->after() hanya berpengaruh di MySQL/MariaDB.
+     */
+    public function up(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->string('nomor_surat_kedua', 100)->nullable()->after('nomor_surat');
+            $table->string('file_surat_pengajuan_kedua')->nullable()->after('file_surat_pengajuan');
+            $table->string('file_surat_magang_kedua')->nullable()->after('file_surat_magang');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('pengajuan_magang', function (Blueprint $table) {
+            $table->dropColumn([
+                'nomor_surat_kedua',
+                'file_surat_pengajuan_kedua',
+                'file_surat_magang_kedua',
+            ]);
+        });
+    }
+};
+
+
+========== D:\form-magang-backend\database\migrations\2026_11_16_150058_add_no_wa_to_users_table.php ==========
+
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            $table->string('no_wa', 15)->nullable()->unique();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            $table->dropUnique(['no_wa']);
+            $table->dropColumn('no_wa');
+        });
+    }
+};
+
+
+========== D:\form-magang-backend\database\factories\UserFactory.php ==========
+
+<?php
+
+namespace Database\Factories;
+
+use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+
+/**
+ * @extends Factory<User>
+ */
+class UserFactory extends Factory
+{
+    /**
+     * The current password being used by the factory.
+     */
+    protected static ?string $password;
+
+    /**
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
+     */
+    public function definition(): array
+    {
+        return [
+            'name' => fake()->name(),
+            'email' => fake()->unique()->safeEmail(),
+            'email_verified_at' => now(),
+            'password' => static::$password ??= Hash::make('password'),
+            'remember_token' => Str::random(10),
+        ];
+    }
+
+    /**
+     * Indicate that the model's email address should be unverified.
+     */
+    public function unverified(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'email_verified_at' => null,
+        ]);
+    }
+}
+
+
+========== config\magang.php ==========
+
+<?php
+
+return [
+    // alamat frontend, dipakai untuk isi QR verifikasi
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+    // Alamat halaman yang dituju QR. Bawaan: halaman verifikasi milik backend sendiri.
+    'verifikasi_url' => env('VERIFIKASI_URL', rtrim(env('APP_URL', 'http://localhost'), '/') . '/verifikasi'),
+
+    'fakultas' => 'Fakultas Kehutanan dan Lingkungan',
+    'kota'     => 'Bogor',
+    'maks_anggota' => 10,
+ 
+    // Nomor surat pengantar magang. {urut} naik otomatis, {tahun} tahun saat disetujui.
+    'nomor_surat' => [
+        'format'     => '{urut}/IT3.F4/PK.01.06/{tahun}',
+        // nomor urut pertama setiap tahun (ubah lewat .env kalau melanjutkan dari angka tertentu)
+        'mulai_dari' => env('NOMOR_SURAT_MULAI', 1),
+    ],
+
+    // Logo di kop surat, relatif terhadap folder public
+    'logo_path' => env('LOGO_PATH', 'images/logo-ipb.png'),
+
+    // Isi kop surat pengantar magang
+    'kop' => [
+        'kementerian' => 'KEMENTERIAN PENDIDIKAN TINGGI, SAINS, DAN TEKNOLOGI',
+        'institusi'   => 'INSTITUT PERTANIAN BOGOR',
+        'kontak'      => [
+            'Kampus IPB Dramaga, Bogor 16680',
+            'Telepon (0251) 8621677',
+            'fahutan@apps.ipb.ac.id',
+            'fahutan.ipb.ac.id',
+        ],
+        'slogan'      => 'Inspiring Innovation with Integrity',
+    ],
+
+    // Penandatangan surat pengantar magang
+    'penandatangan' => [
+        'jabatan'  => ['Wakil Dekan', 'Bidang Akademik, Kemahasiswaan dan Alumni'],
+        'nama'     => env('PENANDATANGAN_NAMA', 'Nama Wakil Dekan, gelar'),
+        'nip'      => env('PENANDATANGAN_NIP', '000000000000000000'),
+        // gambar tanda tangan di folder public. Kosong = ruang kosong untuk tanda tangan basah
+        'ttd_path' => env('PENANDATANGAN_TTD'),
+    ],
+
+    // Kredensial akun admin bawaan (dipakai oleh AdminSeeder)
+    'admin' => [
+        'email'    => env('ADMIN_EMAIL'),
+        'password' => env('ADMIN_PASSWORD'),
+    ],
+];
+
+
+========== tests\Pest.php ==========
+
+<?php
+
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+pest()->extend(TestCase::class)
+    ->use(RefreshDatabase::class)
+    ->in('Feature');
+
+
+========== phpunit.xml ==========
+
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="BROADCAST_CONNECTION" value="null"/>
+        <env name="CACHE_STORE" value="array"/>
+        <env name="DB_CONNECTION" value="sqlite"/>
+        <env name="DB_DATABASE" value=":memory:"/>
+        <env name="DB_URL" value=""/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+    </php>
+</phpunit>
