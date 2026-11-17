@@ -110,7 +110,7 @@ class SuratWhatsAppService
         return preg_match('/^62\d{8,13}$/', $digit) ? $digit : null;
     }
 
-    private function susunPesan(
+        private function susunPesan(
         PengajuanMagang $pengajuan,
         array $instansi,
         string $url,
@@ -119,14 +119,16 @@ class SuratWhatsAppService
         $batas = $berlakuSampai->copy()
             ->timezone('Asia/Jakarta')
             ->locale('id')
-            ->translatedFormat('j F Y, H:i');
+            ->translatedFormat('l, j F Y \p\u\k\u\l H.i');
 
         $baris = [
-            "Halo {$pengajuan->user->name},",
+            $this->sapaanWaktu() . ", {$pengajuan->user->name}.",
             '',
-            'Surat Pengantar Magang untuk pengajuan Anda telah terbit.',
+            'Kami dari Admin Fakultas Kehutanan dan Lingkungan IPB menginformasikan bahwa '
+                . 'pengajuan magang Anda telah *DISETUJUI* dan Surat Pengantar Magang telah diterbitkan.',
             '',
-            "Instansi: {$instansi['nama']}",
+            '*Rincian surat:*',
+            "Instansi tujuan: {$instansi['nama']}",
         ];
 
         if (filled($instansi['nomor'])) {
@@ -138,13 +140,42 @@ class SuratWhatsAppService
                 . ' s.d. ' . $this->tanggal($instansi['selesai']);
         }
 
-        $baris[] = '';
-        $baris[] = "Unduh surat melalui tautan berikut (berlaku sampai {$batas} WIB):";
-        $baris[] = $url;
-        $baris[] = '';
-        $baris[] = 'Terima kasih.';
+        $baris = array_merge($baris, [
+            '',
+            'Silakan unduh Surat Pengantar Magang melalui tautan berikut:',
+            $url,
+            '',
+            "Tautan berlaku sampai {$batas} WIB. Setelah melewati batas waktu tersebut, "
+                . 'tautan tidak dapat dibuka lagi. Mohon segera mengunduh dan menyimpan surat.',
+            '',
+            '*Catatan penting:*',
+            '1. Tautan ini bersifat pribadi, mohon tidak dibagikan kepada pihak lain.',
+            '2. Periksa kembali nama, NIM, dan data instansi pada surat. Jika ada yang tidak sesuai, '
+                . 'segera hubungi kami melalui chat ini.',
+            '3. Surat dapat dicetak dan diserahkan kepada instansi tujuan sesuai ketentuan instansi.',
+            '',
+            'Demikian informasi ini kami sampaikan. Atas perhatian dan kerja samanya, kami ucapkan terima kasih.',
+            '',
+            'Hormat kami,',
+            'Admin',
+            'Fakultas Kehutanan dan Lingkungan',
+            'Institut Pertanian Bogor',
+        ]);
 
         return implode("\n", $baris);
+    }
+
+    /** Sapaan sesuai jam WIB: pagi 04.00-10.59, siang 11.00-14.59, sore 15.00-17.59, malam 18.00-03.59. */
+    private function sapaanWaktu(?CarbonInterface $waktu = null): string
+    {
+        $jam = ($waktu ?? now())->copy()->timezone('Asia/Jakarta')->hour;
+
+        return match (true) {
+            $jam >= 4 && $jam < 11  => 'Selamat pagi',
+            $jam >= 11 && $jam < 15 => 'Selamat siang',
+            $jam >= 15 && $jam < 18 => 'Selamat sore',
+            default                 => 'Selamat malam',
+        };
     }
 
     private function tanggal(CarbonInterface $tanggal): string
