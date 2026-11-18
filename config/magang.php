@@ -49,5 +49,5 @@ return [
     ],
 
     // Peringatan di halaman admin muncul mulai pengajuan ke-N dari mahasiswa yang sama.
-    'ambang_pengajuan' => env('AMBANG_PENGAJUAN', 3),
+    'ambang_peringatan_pengajuan' => env('AMBANG_PENGAJUAN', 3),
 ];
