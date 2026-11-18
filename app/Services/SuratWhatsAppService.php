@@ -171,8 +171,8 @@ class SuratWhatsAppService
         $jam = ($waktu ?? now())->copy()->timezone('Asia/Jakarta')->hour;
 
         return match (true) {
-            $jam >= 4 && $jam < 11  => 'Selamat pagi',
-            $jam >= 11 && $jam < 15 => 'Selamat siang',
+            $jam >= 4 && $jam < 10  => 'Selamat pagi',
+            $jam >= 10 && $jam < 15 => 'Selamat siang',
             $jam >= 15 && $jam < 18 => 'Selamat sore',
             default                 => 'Selamat malam',
         };
