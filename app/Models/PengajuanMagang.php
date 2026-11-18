@@ -71,7 +71,7 @@ class PengajuanMagang extends Model
      */
     public static function ambangPeringatan(): int
     {
-        return max((int) config('magang.ambang_peringatan_pengajuan', 2), 1);
+        return max((int) config('magang.ambang_peringatan_pengajuan', 3), 1);
     }
 
     /**
